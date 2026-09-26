@@ -1,0 +1,75 @@
+import type {
+  CreateEntryReq,
+  Entry,
+  HanziRes,
+  ListEntriesRes,
+  Me,
+  PatchEntryReq,
+  PatchMeReq,
+  PinyinRes,
+  TranslateRes,
+} from "../shared/api";
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Dev identity switcher. Sent whenever present; the server only honors
+ * x-dev-user when TRUST_PROXY_HEADERS=0 (dev/test). Behind a real forward-auth
+ * proxy the header is ignored, so this is safe in production builds.
+ */
+function devUser(): string | null {
+  return localStorage.getItem("devUser");
+}
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body !== undefined) headers.set("content-type", "application/json");
+  const du = devUser();
+  if (du) headers.set("x-dev-user", du);
+  const res = await fetch(path, { ...init, headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let msg = `${res.status}`;
+    try {
+      msg = (JSON.parse(text) as { error?: string }).error ?? msg;
+    } catch {
+      /* not json */
+    }
+    throw new ApiError(res.status, msg);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  me: () => req<Me>("/api/me"),
+  patchMe: (p: PatchMeReq) =>
+    req<Me>("/api/me", { method: "PATCH", body: JSON.stringify(p) }),
+
+  translate: (text: string, audience?: string | null) =>
+    req<TranslateRes>("/api/ask/translate", {
+      method: "POST",
+      body: JSON.stringify({ text, ...(audience ? { audience } : {}) }),
+    }),
+  pinyin: (text: string) =>
+    req<PinyinRes>("/api/ask/pinyin", { method: "POST", body: JSON.stringify({ text }) }),
+  hanzi: (text: string) =>
+    req<HanziRes>("/api/ask/hanzi", { method: "POST", body: JSON.stringify({ text }) }),
+
+  entries: (scope: "mine" | "all", q?: string) =>
+    req<ListEntriesRes>(`/api/entries?scope=${scope}${q ? `&q=${encodeURIComponent(q)}` : ""}`),
+  createEntry: (e: CreateEntryReq) =>
+    req<Entry & { duplicate?: boolean }>("/api/entries", { method: "POST", body: JSON.stringify(e) }),
+  patchEntry: (id: string, p: PatchEntryReq) =>
+    req<Entry>(`/api/entries/${id}`, { method: "PATCH", body: JSON.stringify(p) }),
+  deleteEntry: (id: string) => req<void>(`/api/entries/${id}`, { method: "DELETE" }),
+
+  ttsStatus: () => req<{ available: boolean }>("/api/tts/status"),
+};

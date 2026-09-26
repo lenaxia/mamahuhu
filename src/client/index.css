@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.hanzi {
+  font-family: "PingFang TC", "Noto Sans CJK TC", "Microsoft JhengHei", "Source Han Sans TC", system-ui, sans-serif;
+  font-weight: 500;
+}
+
+/* zhuyin column: vertical writing, upright glyphs */
+.bpmf-col {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  display: inline-block;
+  vertical-align: top;
+  line-height: 1.05;
+}
+
+/* spoken-tone mark (ˊˇˋ) beside the zhuyin column, upper right */
+.bpmf-tone {
+  display: inline-block;
+  margin-left: 0.05em;
+  margin-top: 0.05em;
+  font-size: 1.35em;
+  font-weight: 600;
+}
+
+input,
+textarea {
+  font-size: 16px; /* prevent iOS zoom on focus */
+}

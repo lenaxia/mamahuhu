@@ -1,0 +1,218 @@
+import { z } from "zod";
+
+/**
+ * THE API contract. Server routes validate incoming bodies with these schemas
+ * and shape responses as the inferred types; the client imports the same types
+ * — drift is a compile error, not a runtime surprise.
+ */
+
+export const AnnotationsSchema = z.enum(["both", "bpmf", "pinyin"]);
+export type Annotations = z.infer<typeof AnnotationsSchema>;
+
+export const RegisterSchema = z.enum(["casual", "formal"]);
+export type Register = z.infer<typeof RegisterSchema>;
+
+export const EntrySourceSchema = z.enum(["en-translate", "pinyin", "hanzi", "stt", "ocr", "manual"]);
+export type EntrySource = z.infer<typeof EntrySourceSchema>;
+
+export const SyllableCharSchema = z.object({
+  h: z.string().min(1).max(2),
+  py: z.string().default(""),
+  bpmf: z.string().default(""),
+});
+export type SyllableChar = z.infer<typeof SyllableCharSchema>;
+export const SyllablesSchema = z.array(z.array(SyllableCharSchema));
+export type Syllables = z.infer<typeof SyllablesSchema>;
+
+// ---- users ----
+
+export const MeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  annotations: AnnotationsSchema,
+  ttsSpeed: z.number(),
+  /** optional audience hint that fine-tunes translations, e.g. "talking to my 3-year-old" */
+  audience: z.string().nullable(),
+  onboarded: z.boolean(),
+  nameFromProxy: z.boolean(),
+});
+export type Me = z.infer<typeof MeSchema>;
+
+export const PatchMeReqSchema = z.object({
+  /** ignored by the server when nameFromProxy is true */
+  name: z.string().trim().min(1).max(60).optional(),
+  annotations: AnnotationsSchema.optional(),
+  ttsSpeed: z.number().min(0.5).max(1.5).optional(),
+  audience: z.string().trim().max(120).nullable().optional(),
+  onboarded: z.boolean().optional(),
+});
+export type PatchMeReq = z.infer<typeof PatchMeReqSchema>;
+
+// ---- translation (LLM-backed) ----
+
+export const CardVariantSchema = z.object({
+  traditional: z.string().min(1),
+  simplified: z.string().default(""),
+  pinyin: z.string().min(1),
+  bpmf: z.string().default(""),
+  gloss: z.string().default(""),
+  note: z.string().optional(),
+});
+export type CardVariant = z.infer<typeof CardVariantSchema>;
+
+export const TranslateReqSchema = z.object({
+  text: z.string().trim().min(1).max(300),
+  audience: z.string().trim().max(120).optional(),
+});
+export type TranslateReq = z.infer<typeof TranslateReqSchema>;
+
+export const TranslateResSchema = z.object({
+  source: z.string(),
+  register: RegisterSchema,
+  casual: CardVariantSchema.optional(),
+  formal: CardVariantSchema.optional(),
+  syllables: SyllablesSchema,
+  formalSyllables: SyllablesSchema.optional(),
+  /** other senses of the ambiguous input — each with its own casual/formal pair */
+  alternatives: z
+    .array(
+      z.object({
+        casual: z.object({ variant: CardVariantSchema, syllables: SyllablesSchema }),
+        formal: z.object({ variant: CardVariantSchema, syllables: SyllablesSchema }),
+      }),
+    )
+    .max(3)
+    .optional(),
+  lowConfidence: z.boolean().optional(),
+});
+export type TranslateRes = z.infer<typeof TranslateResSchema>;
+
+/** Raw shape the LLM must produce (validated before trusting it). */
+export const LlmTranslateSchema = z.object({
+  casual: z.object({
+    traditional: z.string().min(1),
+    simplified: z.string(),
+    pinyin: z.string(),
+    gloss: z.string(),
+    note: z.string().optional(),
+  }),
+  formal: z.object({
+    traditional: z.string().min(1),
+    simplified: z.string(),
+    pinyin: z.string(),
+    gloss: z.string(),
+    note: z.string().optional(),
+  }),
+  alternatives: z
+    .array(
+      z.object({
+        casual: z.object({
+          traditional: z.string().min(1),
+          simplified: z.string(),
+          pinyin: z.string(),
+          gloss: z.string(),
+          note: z.string().optional(),
+        }),
+        formal: z.object({
+          traditional: z.string().min(1),
+          simplified: z.string(),
+          pinyin: z.string(),
+          gloss: z.string(),
+          note: z.string().optional(),
+        }),
+      }),
+    )
+    .max(3)
+    .optional(),
+});
+export type LlmTranslate = z.infer<typeof LlmTranslateSchema>;
+
+// ---- pinyin interpreter (local dictionary) ----
+
+export const RenderedWordSchema = z.object({
+  traditional: z.string(),
+  simplified: z.string(),
+  pinyin: z.string(),
+  bpmf: z.string(),
+  english: z.string(),
+});
+export type RenderedWord = z.infer<typeof RenderedWordSchema>;
+
+export const InterpretationSchema = z.object({
+  traditional: z.string(),
+  simplified: z.string(),
+  pinyin: z.string(),
+  bpmf: z.string(),
+  english: z.string(),
+  words: z.array(RenderedWordSchema),
+  exactEntry: z.boolean(),
+});
+export type Interpretation = z.infer<typeof InterpretationSchema>;
+
+export const PinyinReqSchema = z.object({ text: z.string().trim().min(1).max(200) });
+export const PinyinResSchema = z.object({
+  interpretations: z.array(InterpretationSchema),
+  candidates: z.array(RenderedWordSchema),
+});
+export type PinyinRes = z.infer<typeof PinyinResSchema>;
+
+export const HanziReqSchema = z.object({ text: z.string().trim().min(1).max(200) });
+export const HanziWordSchema = RenderedWordSchema.extend({ known: z.boolean() });
+export const HanziResSchema = z.object({ words: z.array(HanziWordSchema) });
+export type HanziRes = z.infer<typeof HanziResSchema>;
+
+// ---- entries ----
+
+export const CreateEntryReqSchema = z.object({
+  traditional: z.string().trim().min(1).max(200),
+  simplified: z.string().default(""),
+  pinyin: z.string().default(""),
+  pinyinFlat: z.string().default(""),
+  bpmf: z.string().default(""),
+  english: z.string().default(""),
+  register: RegisterSchema.default("casual"),
+  exampleZh: z.string().max(500).optional(),
+  exampleEn: z.string().max(500).optional(),
+  notes: z.string().max(2000).optional(),
+  source: EntrySourceSchema,
+  syllables: SyllablesSchema,
+});
+export type CreateEntryReq = z.infer<typeof CreateEntryReqSchema>;
+
+export const EntrySchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  userName: z.string(),
+  variety: z.string(),
+  traditional: z.string(),
+  simplified: z.string(),
+  pinyin: z.string(),
+  pinyinFlat: z.string(),
+  bpmf: z.string(),
+  english: z.string(),
+  register: RegisterSchema,
+  exampleZh: z.string().nullable(),
+  exampleEn: z.string().nullable(),
+  notes: z.string().nullable(),
+  source: EntrySourceSchema,
+  syllables: SyllablesSchema,
+  createdAt: z.string(),
+});
+export type Entry = z.infer<typeof EntrySchema>;
+
+export const PatchEntryReqSchema = z.object({
+  english: z.string().max(500).optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  register: RegisterSchema.optional(),
+  exampleZh: z.string().max(500).nullable().optional(),
+  exampleEn: z.string().max(500).nullable().optional(),
+});
+export type PatchEntryReq = z.infer<typeof PatchEntryReqSchema>;
+
+export const ListEntriesResSchema = z.array(EntrySchema);
+export type ListEntriesRes = z.infer<typeof ListEntriesResSchema>;
+
+// ---- errors ----
+
+export const ErrorSchema = z.object({ error: z.string() });
+export type ApiError = z.infer<typeof ErrorSchema>;

@@ -1,0 +1,75 @@
+# bjw-s/app-template v3 values for Mamahuhu
+# helm install mamahuhu bjw-s/app-template -f deploy/helm-values.yaml
+controllers:
+  main:
+    strategy: Recreate   # SQLite single-writer; use Postgres + RollingUpdate for HA
+    containers:
+      app:
+        image:
+          repository: ghcr.io/YOURUSER/mamahuhu
+          tag: latest
+          pullPolicy: IfNotPresent
+        env:
+          DB_DRIVER: sqlite
+          SQLITE_PATH: /data/app.db
+          # --- forward auth: pick the header your proxy injects ---
+          TRUST_PROXY_HEADERS: "1"
+          AUTH_HEADER: x-authentik-username   # authelia: remote-user / traefik: x-forwarded-user
+          AUTH_NAME_HEADER: x-authentik-name
+          # --- models via LiteLLM ---
+          OPENAI_API_BASE: http://litellm.litellm.svc.cluster.local:4000/v1
+          MODEL_CHAT: default        # qwen3.8 27b multimodal
+          MODEL_TTS: kokoro          # empty = browser TTS fallback
+          TTS_MODE: auto             # auto | server | browser
+          TTS_VOICE: zf_xiaoxiao     # female zh: zf_xiaoxiao/zf_xiaobei · male: zm_yunxi
+        envFrom:
+          - secretRef:
+              name: mamahuhu-secret # must contain OPENAI_API_KEY
+        probes:
+          liveness: &probes
+            enabled: true
+            custom: true
+            spec:
+              httpGet:
+                path: /healthz
+                port: &port http
+              initialDelaySeconds: 20
+          readiness:
+            <<: *probes
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+
+service:
+  main:
+    ports:
+      http:
+        port: *port
+
+ingress:
+  main:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: mamahuhu.example.com
+        paths:
+          - path: /
+            service:
+              name: main
+              port: http
+    # put your forward-auth middleware annotation here, e.g. Authelia:
+    # annotations:
+    #   nginx.ingress.kubernetes.io/auth-url: "https://auth.example.com/api/verify"
+    #   nginx.ingress.kubernetes.io/auth-signin: "https://auth.example.com"
+
+persistence:
+  data:
+    enabled: true
+    type: persistentVolumeClaim
+    accessMode: ReadWriteOnce
+    size: 1Gi
+    globalMounts:
+      - path: /data
