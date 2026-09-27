@@ -298,9 +298,10 @@ async function buildPhrase(
 
   const app: App = new Hono<{ Variables: { user: UserRow } }>();
 
-  /** first dictionary sense that isn't a surname/variant note (坐 = "sit", not "surname Zuo") */
+  /** first dictionary sense that isn't a surname/variant note (坐 = "sit", not "surname Zuo").
+   *  Looks up traditional first, then simplified — mainland print is 简体. */
   const pickSense = (trad: string): RenderedWord | null => {
-    const entries = dictionary.byTrad.get(trad);
+    const entries = dictionary.byTrad.get(trad) ?? dictionary.bySimp.get(trad);
     if (!entries?.length) return null;
     const hit = entries.find((e) => !/^(surname|variant of|old variant|see )/i.test(e.english)) ?? entries[0]!;
     return renderWord(hit);

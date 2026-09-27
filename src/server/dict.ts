@@ -5,6 +5,8 @@ import type { Sql } from "./db";
 export interface Dictionary {
   index: DictIndex;
   byTrad: Map<string, DictWord[]>;
+  /** simplified-script lookup — posters/print from mainland China are 简体 */
+  bySimp: Map<string, DictWord[]>;
   count: number;
 }
 
@@ -21,11 +23,16 @@ export async function loadDictionary(sql: Sql): Promise<Dictionary> {
   }
   const index = buildIndex(words);
   const byTrad = new Map<string, DictWord[]>();
+  const bySimp = new Map<string, DictWord[]>();
   for (const w of words) {
+    if (w.simplified && w.simplified !== w.traditional) {
+      const curS = bySimp.get(w.simplified);
+      if (curS) { if (curS.length < 4) curS.push(w); } else bySimp.set(w.simplified, [w]);
+    }
     const cur = byTrad.get(w.traditional);
     if (cur) { if (cur.length < 4) cur.push(w); } else byTrad.set(w.traditional, [w]);
   }
-  cached = { index, byTrad, count: words.length };
+  cached = { index, byTrad, bySimp, count: words.length };
   console.log(`[dict] ${words.length} entries, index built in ${Date.now() - t0}ms`);
   return cached;
 }
