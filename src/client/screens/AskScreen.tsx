@@ -359,6 +359,13 @@ export function AskScreen(): React.JSX.Element {
         <div className="rounded-xl bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-500">{ocrResult.pageCount ?? 1} page(s) processed — open from History for the overlay view</div>
       )}
 
+      {spokenText && (
+        <div className="text-xs text-neutral-400">
+          <span className="uppercase tracking-wide">heard: “{spokenText}”</span>
+          {spokenConfidence !== null && spokenConfidence < 0.7 && (
+            <span className="ml-2 text-amber-600 dark:text-amber-400">low confidence — maybe retry &amp; enunciate</span>
+          )}
+
       {translateCard && <ResultCard card={translateCard} />}
 
       {hanziWords && (
@@ -386,12 +393,6 @@ export function AskScreen(): React.JSX.Element {
         </div>
       )}
 
-      {spokenText && (
-        <div className="text-xs text-neutral-400">
-          <span className="uppercase tracking-wide">heard: “{spokenText}”</span>
-          {spokenConfidence !== null && spokenConfidence < 0.7 && (
-            <span className="ml-2 text-amber-600 dark:text-amber-400">low confidence — maybe retry &amp; enunciate</span>
-          )}
         </div>
       )}
 
