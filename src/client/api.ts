@@ -114,6 +114,13 @@ export const api = {
   followUp: (body: { question: string; hanzi?: string; gloss?: string; askId?: string }) =>
     req<{ answer: string }>("/api/ask/followup", { method: "POST", body: JSON.stringify(body) }),
 
+  reviewDue: () => req<Entry[]>("/api/review/due"),
+  review: (id: string, outcome: "again" | "hard" | "good" | "easy") =>
+    req<{ id: string; srsBox: number; srsDue: string; reviewed: number }>("/api/review", {
+      method: "POST",
+      body: JSON.stringify({ id, outcome }),
+    }),
+
   history: () => req<HistoryItem[]>("/api/history"),
   historyDetail: (id: string) => req<HistoryDetail>(`/api/history/${id}`),
   deleteHistory: (id: string) => req<void>(`/api/history/${id}`, { method: "DELETE" }),

@@ -20,6 +20,8 @@ import {
   HistoryItemSchema,
   PatchEntryReqSchema,
   PatchMeReqSchema,
+  ReviewReqSchema,
+  ReviewResSchema,
   PinyinReqSchema,
   PinyinResSchema,
   RegisterSchema,
@@ -152,6 +154,7 @@ interface EntryRow {
   pinyin: string; pinyin_flat: string; bpmf: string; english: string; register: string;
   example_zh: string | null; example_en: string | null; notes: string | null;
   tags: string; source: string; syllables: string; created_at: string; user_name?: string;
+  srs_box: number; srs_due: string | null; srs_streak: number; review_count: number;
 }
 
 function entryDTO(row: EntryRow): Entry {
@@ -174,6 +177,9 @@ function entryDTO(row: EntryRow): Entry {
     source: row.source,
     syllables: JSON.parse(row.syllables) as Syllables,
     createdAt: row.created_at,
+    srsBox: row.srs_box ?? 0,
+    srsDue: row.srs_due ?? null,
+    srsStreak: row.srs_streak ?? 0,
   });
 }
 
@@ -850,9 +856,67 @@ async function buildPhrase(
     const text = (c.req.query("text") ?? "").trim();
     const speed = Number(c.req.query("speed") ?? "1");
     if (!text) return c.json({ error: "text required" }, 400);
-    const res = await tts.synthesize(text, { speed: Number.isFinite(speed) ? speed : 1 });
+    const sp = Number.isFinite(speed) ? speed : 1;
+    // disk cache under DATA_DIR/audio — synthesize once, replay forever
+    const { createHash } = await import("node:crypto");
+    const key = createHash("sha256").update(`${text}|${sp}`).digest("hex").slice(0, 40);
+    const dir = `${dataDir()}/audio`;
+    const path = `${dir}/${key}.mp3`;
+    try {
+      const buf = await readFile(path);
+      return c.body(new Uint8Array(buf), 200, { "content-type": "audio/mpeg", "cache-control": "public, max-age=31536000, immutable", "x-tts-cache": "hit" });
+    } catch {
+      /* miss */
+    }
+    const res = await tts.synthesize(text, { speed: sp });
     if (!res.ok) return c.json({ error: res.error }, 503);
-    return c.body(res.value.data, 200, { "content-type": res.value.mime, "cache-control": "public, max-age=86400" });
+    try {
+      const { mkdir: mk, writeFile: wf } = await import("node:fs/promises");
+      await mk(dir, { recursive: true });
+      await wf(path, res.value.data);
+      await sql.run(
+        "INSERT INTO audio_files (key, path, bytes, mime, created_at) VALUES (?,?,?,?,?) ON CONFLICT(key) DO NOTHING",
+        [key, path, res.value.data.byteLength, "audio/mpeg", new Date().toISOString()],
+      ).catch(() => undefined);
+    } catch {
+      /* cache write is best-effort */
+    }
+    return c.body(res.value.data, 200, { "content-type": res.value.mime, "cache-control": "public, max-age=31536000, immutable", "x-tts-cache": "miss" });
+  });
+
+  // ---- SRS review (Leitner: box 0-5, intervals 10m/1h/8h/1d/3d/7d) ----
+  const SRS_INTERVALS = [10 * 60e3, 60 * 60e3, 8 * 60 * 60e3, 24 * 60 * 60e3, 3 * 24 * 60 * 60e3, 7 * 24 * 60 * 60e3];
+
+  app.get("/api/review/due", async (c) => {
+    const user = c.get("user");
+    const now = new Date().toISOString();
+    const rows = await sql.all<EntryRow>(
+      `SELECT e.*, u.name AS user_name FROM entries e JOIN users u ON u.id = e.user_id
+       WHERE e.user_id = ? AND (e.srs_due IS NULL OR e.srs_due <= ?)
+       ORDER BY e.srs_due IS NULL DESC, e.created_at DESC LIMIT 50`,
+      [user.id, now],
+    );
+    return c.json(ListEntriesResSchema.parse(rows.map(entryDTO)));
+  });
+
+  app.post("/api/review", async (c) => {
+    const user = c.get("user");
+    const parsed = ReviewReqSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "bad request" }, 400);
+    const { id, outcome } = parsed.data;
+    const row = await sql.get<EntryRow>("SELECT * FROM entries WHERE id = ? AND user_id = ?", [id, user.id]);
+    if (!row) return c.json({ error: "not found" }, 404);
+    let box = row.srs_box ?? 0;
+    if (outcome === "again") box = 0;
+    else if (outcome === "hard") box = Math.max(0, box - 1);
+    else if (outcome === "good") box = Math.min(5, box + 1);
+    else box = Math.min(5, box + 2); // easy
+    const due = new Date(Date.now() + SRS_INTERVALS[box]!).toISOString();
+    await sql.run(
+      "UPDATE entries SET srs_box = ?, srs_due = ?, srs_streak = ?, review_count = review_count + 1 WHERE id = ?",
+      [box, due, outcome === "again" ? 0 : (row.srs_streak ?? 0) + 1, id],
+    );
+    return c.json(ReviewResSchema.parse({ id, srsBox: box, srsDue: due, reviewed: (row.review_count ?? 0) + 1 }));
   });
 
   // ---- export ----

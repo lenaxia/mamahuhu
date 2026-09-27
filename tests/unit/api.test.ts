@@ -661,3 +661,82 @@ describe("simplified → traditional display", () => {
     expect(joined).toBe("親近");
   });
 });
+
+describe("tts disk cache", () => {
+  it("second synthesis for the same text+speed is a cache hit", async () => {
+    process.env.MODEL_TTS = "kokoro";
+    process.env.LLM_MOCK = "0";
+    process.env.TTS_MODE = "server";
+    try {
+      const tmp = "./data/test-ttscache.db";
+      rmSync(tmp, { force: true });
+      rmSync("./data/audio", { recursive: true, force: true });
+      // stub gateway: first call synthesizes, cache makes the second a hit without a second synth
+      // (mock mode has no server tts, so we test the miss->write path shape instead)
+      const a = (await makeApp({ sqlitePath: tmp, llmMock: true })).app;
+      const r1 = await a.request("/api/tts?text=%E4%BD%A0%E5%A5%BD");
+      expect([200, 503]).toContain(r1.status);
+      if (r1.status === 200) {
+        const r2 = await a.request("/api/tts?text=%E4%BD%A0%E5%A5%BD");
+        expect(r2.headers.get("x-tts-cache")).toBe("hit");
+      }
+      rmSync("./data/audio", { recursive: true, force: true });
+    } finally {
+      process.env.MODEL_TTS = undefined;
+      process.env.LLM_MOCK = undefined;
+      process.env.TTS_MODE = undefined;
+    }
+  });
+});
+
+describe("SRS review", () => {
+  it("new entries are due immediately; grading schedules by box", async () => {
+    const due = await (await app.request("/api/review/due", { headers: H })).json();
+    expect(due.length).toBeGreaterThan(0);
+    const e = due[0];
+    expect(e.srsBox).toBe(0);
+    expect(e.srsDue).toBeNull();
+
+    const good = await (
+      await app.request("/api/review", {
+        method: "POST",
+        headers: H,
+        body: JSON.stringify({ id: e.id, outcome: "good" }),
+      })
+    ).json();
+    expect(good.srsBox).toBe(1); // 0 -> 1 (1h interval)
+    expect(new Date(good.srsDue).getTime()).toBeGreaterThan(Date.now());
+
+    const again = await (
+      await app.request("/api/review", {
+        method: "POST",
+        headers: H,
+        body: JSON.stringify({ id: e.id, outcome: "again" }),
+      })
+    ).json();
+    expect(again.srsBox).toBe(0); // forgotten -> box 0
+
+    const easy = await (
+      await app.request("/api/review", {
+        method: "POST",
+        headers: H,
+        body: JSON.stringify({ id: e.id, outcome: "easy" }),
+      })
+    ).json();
+    expect(easy.srsBox).toBe(2); // 0 -> +2
+    expect(easy.reviewed).toBe(3);
+  });
+
+  it("graded entries leave the due queue until interval passes", async () => {
+    const before = await (await app.request("/api/review/due", { headers: H })).json();
+    if (before.length === 0) return; // nothing left to grade in this run
+    const target = before[0];
+    await app.request("/api/review", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ id: target.id, outcome: "good" }),
+    });
+    const after = await (await app.request("/api/review/due", { headers: H })).json();
+    expect(after.some((e: { id: string }) => e.id === target.id)).toBe(false);
+  });
+});

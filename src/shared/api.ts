@@ -277,8 +277,21 @@ export const EntrySchema = z.object({
   source: EntrySourceSchema,
   syllables: SyllablesSchema,
   createdAt: z.string(),
+  /** SRS (Leitner box system) */
+  srsBox: z.number().int().min(0).max(5).default(0),
+  srsDue: z.string().nullable(),
+  srsStreak: z.number().int().default(0),
 });
 export type Entry = z.infer<typeof EntrySchema>;
+
+export const ReviewReqSchema = z.object({ id: z.string(), outcome: z.enum(["again", "hard", "good", "easy"]) });
+export const ReviewResSchema = z.object({
+  id: z.string(),
+  srsBox: z.number(),
+  srsDue: z.string(),
+  reviewed: z.number(),
+});
+export type ReviewRes = z.infer<typeof ReviewResSchema>;
 
 export const PatchEntryReqSchema = z.object({
   english: z.string().max(500).optional(),

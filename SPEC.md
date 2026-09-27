@@ -223,8 +223,10 @@ valid-syllable set ③ simplified script taken from CEDICT entries when present.
   (Mine/Everyone), Settings, browser TTS, forward-auth, dual DB, Docker/helm, tests.
 - **Phase 2**: Speak (mic → STT → transcript card), Photo (camera → OCR → tappable
   word chips, known-word badges), server TTS cache, per-word dictionary popover.
-- **Phase 3**: service-worker offline dashboard, SRS flashcards, tone-sandhi display
-  (不 ㄅㄨˊ before 4th tone), Cantonese variety (`zh-HK`, jyutping), CSV→Anki export.
+- **Phase 3 (shipped in v0.3.0)**: SRS flashcards (Leitner 6-box, 10m/1h/8h/1d/3d/7d),
+  TTS disk cache under DATA_DIR/audio, multi-arch image publishing to GHCR on semver tags.
+- **Later**: service-worker offline dashboard, tone-sandhi display (不 ㄅㄨˊ before 4th tone),
+  Cantonese variety (`zh-HK`, jyutping), CSV→Anki export.
 
 ## Non-goals
 
