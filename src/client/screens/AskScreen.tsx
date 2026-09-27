@@ -210,18 +210,19 @@ export function AskScreen(): React.JSX.Element {
       return;
     }
     reset();
-    const lm = new LevelMeter();
-    meter.current = lm;
-    void lm.start(setLevels);
+    setLevels([]); // empty levels = CSS-animated wave (browser mode)
     if (sttServerMode()) {
       const rec = new MicRecorder();
       micRec.current = rec;
       const ok = await rec.start((m) => setError(m));
-      if (!ok) {
-        lm.stop();
-        meter.current = null;
-        setLevels([]);
-      } else setListening(true);
+      if (!ok) return;
+      const stream = rec.getStream();
+      if (stream) {
+        const lm = new LevelMeter();
+        meter.current = lm;
+        lm.attach(stream, setLevels);
+      }
+      setListening(true);
       return;
     }
     if (!browserSttSupported()) {
@@ -286,13 +287,21 @@ export function AskScreen(): React.JSX.Element {
           />
           {listening && (
             <div className="pointer-events-none absolute inset-x-3 bottom-1 flex h-4 items-center justify-center gap-[2px]">
-              {Array.from({ length: 24 }).map((_, i) => (
-                <span
-                  key={i}
-                  className="w-[3px] rounded-full bg-red-500"
-                  style={{ height: `${Math.max(8, (levels[i] ?? 0) * 100)}%`, transition: "height 60ms" }}
-                />
-              ))}
+              {levels.length > 0
+                ? Array.from({ length: 24 }).map((_, i) => (
+                    <span
+                      key={i}
+                      className="w-[3px] rounded-full bg-red-500"
+                      style={{ height: `${Math.max(8, (levels[i] ?? 0) * 100)}%`, transition: "height 60ms" }}
+                    />
+                  ))
+                : Array.from({ length: 24 }).map((_, i) => (
+                    <span
+                      key={i}
+                      className="w-[3px] rounded-full bg-red-500/70 animate-pulse"
+                      style={{ height: `${20 + 60 * Math.abs(Math.sin(i))}%`, animationDelay: `${i * 60}ms` }}
+                    />
+                  ))}
             </div>
           )}
         </div>

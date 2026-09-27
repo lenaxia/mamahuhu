@@ -126,6 +126,11 @@ export class MicRecorder {
   private chunks: Blob[] = [];
   private stream: MediaStream | null = null;
 
+  /** the active capture stream — shared with LevelMeter (one mic consumer on iOS) */
+  getStream(): MediaStream | null {
+    return this.stream;
+  }
+
   async start(onError: (msg: string) => void): Promise<boolean> {
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -183,9 +188,12 @@ export class LevelMeter {
   private analyser: AnalyserNode | null = null;
   private data: Uint8Array<ArrayBuffer> | null = null;
 
-  async start(onLevels: (bars: number[]) => void): Promise<void> {
+  /** Attach to an EXISTING mic stream — never opens a second getUserMedia
+   *  (iOS Safari kills a live SpeechRecognition session when a second audio
+   *  consumer takes the mic). */
+  attach(stream: MediaStream, onLevels: (bars: number[]) => void): void {
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.stream = stream;
       this.ctx = new AudioContext();
       const src = this.ctx.createMediaStreamSource(this.stream);
       this.analyser = this.ctx.createAnalyser();
