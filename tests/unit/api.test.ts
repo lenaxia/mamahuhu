@@ -355,5 +355,10 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     expect(shuijiao?.known).toBe(true);
     expect(xiaomao?.known).toBe(true);
     expect(xiaomao?.saved).toBe(false);
+    // overlay boxes: mock provides line box [20,30,560,110] over 5 hanzi
+    // 小貓(2) 在(1) 睡覺(2) → 睡覺 box ≈ [344,30,560,110]
+    expect(body.positioned).toBe(true);
+    expect(shuijiao?.box?.[0]).toBeCloseTo(344, 0);
+    expect(xiaomao?.box?.[0]).toBeCloseTo(20, 0);
   });
 });

@@ -89,7 +89,10 @@ test("photo mode: upload with mocked OCR, tap word, save", async ({ page }) => {
   await page.setInputFiles('input[type=file]', {
     name: "page.png",
     mimeType: "image/png",
-    buffer: Buffer.alloc(2048, 1),
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/wD/9k7JAAAAAElFTkSuQmCC",
+      "base64",
+    ),
   });
   await expect(page.locator('[data-ocr-word="睡覺"]')).toBeVisible();
   // dad already saved 睡覺 in an earlier test → badge present

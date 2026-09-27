@@ -12,19 +12,26 @@ type Mode = "type" | "speak" | "photo";
 
 const hasHan = (s: string): boolean => /\p{Script=Han}/u.test(s);
 
-/** Downscale a camera photo client-side before upload (max 1280px, jpeg). */
-async function downscale(file: File): Promise<Blob> {
+/** Downscale a camera photo client-side before upload (max 1280px, jpeg). Returns sent-image dims. */
+async function downscale(file: File): Promise<{ blob: Blob; w: number; h: number }> {
   try {
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
-    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
+    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return { blob: file, w: bmp.width, h: bmp.height };
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(bmp.width * scale);
     canvas.height = Math.round(bmp.height * scale);
     canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    return await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.82));
+    const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.82));
+    return { blob, w: canvas.width, h: canvas.height };
   } catch {
-    return file;
+    const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => resolve({ w: 0, h: 0 });
+      img.src = URL.createObjectURL(file);
+    });
+    return { blob: file, ...dims };
   }
 }
 
@@ -43,6 +50,8 @@ export function AskScreen(): React.JSX.Element {
   const [ocrWord, setOcrWord] = useState<z.infer<typeof OcrWordSchema> | null>(null);
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
   const [ocrBusy, setOcrBusy] = useState(false);
+  const [photo, setPhoto] = useState<{ url: string; w: number; h: number } | null>(null);
+  const [imgScale, setImgScale] = useState(0);
 
   function reset(): void {
     setError(null);
@@ -55,6 +64,9 @@ export function AskScreen(): React.JSX.Element {
     setOcrResult(null);
     setOcrWord(null);
     setSavedNow(new Set());
+    if (photo) URL.revokeObjectURL(photo.url);
+    setPhoto(null);
+    setImgScale(0);
   }
 
   async function onPhoto(file: File | null): Promise<void> {
@@ -62,7 +74,9 @@ export function AskScreen(): React.JSX.Element {
     reset();
     setOcrBusy(true);
     try {
-      setOcrResult(await api.ocr(await downscale(file)));
+      const { blob, w, h } = await downscale(file);
+      setPhoto({ url: URL.createObjectURL(blob), w, h });
+      setOcrResult(await api.ocr(blob));
     } catch (e) {
       setError(e instanceof ApiError ? `OCR failed: ${e.message}` : "OCR failed");
     } finally {
@@ -146,33 +160,79 @@ export function AskScreen(): React.JSX.Element {
           </label>
           {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
           {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
-          {ocrResult && (
+          {ocrResult && photo && (
             <div className="space-y-3">
-              <div className="text-xs uppercase tracking-wide text-neutral-400">tap a word</div>
-              {ocrResult.lines.map((line, li) => (
-                <div key={li} className="flex flex-wrap gap-2">
-                  {line.words.map((w, wi) => {
-                    const isSaved = w.saved || savedNow.has(w.traditional);
-                    return (
-                      <button
-                        key={wi}
-                        data-ocr-word={w.traditional}
-                        onClick={() => setOcrWord(ocrWord?.traditional === w.traditional ? null : w)}
-                        className={`hanzi relative rounded-xl border px-3 py-2 text-xl transition ${
-                          ocrWord?.traditional === w.traditional
-                            ? "border-amber-500 bg-amber-50 dark:bg-amber-950/50"
-                            : "border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-                        } ${w.known ? "" : "opacity-50"}`}
-                      >
-                        {w.traditional}
-                        {isSaved && (
-                          <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900" />
-                        )}
-                      </button>
-                    );
-                  })}
+              <div className="relative overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800 select-none">
+                <img
+                  src={photo.url}
+                  alt="page"
+                  className="block w-full"
+                  onLoad={(e) => setImgScale(e.currentTarget.clientWidth / (photo.w || e.currentTarget.naturalWidth || 1))}
+                />
+                {ocrResult.positioned &&
+                  imgScale > 0 &&
+                  ocrResult.lines.flatMap((line, li) =>
+                    line.words
+                      .filter((w) => w.box)
+                      .map((w, wi) => {
+                        const [x1, y1, x2, y2] = w.box!;
+                        const isSaved = w.saved || savedNow.has(w.traditional);
+                        const boxH = (y2 - y1) * imgScale;
+                        return (
+                          <button
+                            key={`${li}-${wi}`}
+                            data-ocr-word={w.traditional}
+                            onClick={() => setOcrWord(ocrWord?.traditional === w.traditional ? null : w)}
+                            style={{
+                              left: x1 * imgScale,
+                              top: y1 * imgScale,
+                              width: (x2 - x1) * imgScale,
+                              height: boxH,
+                              fontSize: Math.max(11, Math.min(boxH * 0.55, 30)),
+                            }}
+                            className={`hanzi absolute flex items-center justify-center overflow-hidden rounded-md border px-0.5 transition ${
+                              ocrWord?.traditional === w.traditional
+                                ? "border-amber-500 bg-amber-500/40 text-amber-900 dark:text-amber-100"
+                                : "border-white/70 bg-white/70 text-neutral-900 backdrop-blur-[1px] dark:bg-black/50 dark:text-white"
+                            } ${w.known ? "" : "opacity-50"}`}
+                          >
+                            {w.traditional}
+                            {isSaved && (
+                              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                            )}
+                          </button>
+                        );
+                      }),
+                  )}
+              </div>
+
+              {/* fallback chips for words without boxes */}
+              {!ocrResult.positioned && (
+                <div className="flex flex-wrap gap-2">
+                  {ocrResult.lines.flatMap((line, li) =>
+                    line.words.map((w, wi) => {
+                      const isSaved = w.saved || savedNow.has(w.traditional);
+                      return (
+                        <button
+                          key={`${li}-${wi}`}
+                          data-ocr-word={w.traditional}
+                          onClick={() => setOcrWord(ocrWord?.traditional === w.traditional ? null : w)}
+                          className={`hanzi relative rounded-xl border px-3 py-2 text-xl transition ${
+                            ocrWord?.traditional === w.traditional
+                              ? "border-amber-500 bg-amber-50 dark:bg-amber-950/50"
+                              : "border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                          } ${w.known ? "" : "opacity-50"}`}
+                        >
+                          {w.traditional}
+                          {isSaved && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900" />}
+                        </button>
+                      );
+                    }),
+                  )}
                 </div>
-              ))}
+              )}
+
+              <div className="text-center text-[11px] text-neutral-400">tap a word on the page</div>
               {ocrWord && (
                 <HanziWordCard
                   word={ocrWord}

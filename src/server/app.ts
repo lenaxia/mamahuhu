@@ -273,13 +273,25 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
     };
     const lines: { words: z.infer<typeof OcrWordSchema>[] }[] = [];
     const lineTexts: string[] = [];
+    let positioned = false;
     for (const line of res.value.lines) {
       lineTexts.push(line.text);
       const words: z.infer<typeof OcrWordSchema>[] = [];
-      for (const seg of segmentHanzi(line.text)) {
-        const direct = lookup(seg);
-        if (direct) {
-          words.push({ ...direct, known: true, saved: savedSet.has(seg) });
+      const segments = segmentHanzi(line.text);
+      const totalChars = segments.reduce((s, seg) => s + [...seg].length, 0) || 1;
+      let xCursor = line.box?.[0];
+      for (const seg of segments) {
+        const hit = lookup(seg);
+        const segLen = [...seg].length;
+        let box: [number, number, number, number] | undefined;
+        if (line.box && xCursor !== undefined) {
+          const w = ((line.box[2] - line.box[0]) * segLen) / totalChars;
+          box = [Math.round(xCursor), line.box[1], Math.round(xCursor + w), line.box[3]];
+          xCursor += w;
+          positioned = true;
+        }
+        if (hit) {
+          words.push({ ...hit, known: true, saved: savedSet.has(seg), box });
           continue;
         }
         for (const ch of [...seg]) {
@@ -290,7 +302,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       }
       if (words.length) lines.push({ words });
     }
-    return c.json(OcrResSchema.parse({ lines, fullText: lineTexts.join("\n") }));
+    return c.json(OcrResSchema.parse({ lines, fullText: lineTexts.join("\n"), positioned }));
   });
 
   // ---- entries ----

@@ -55,10 +55,12 @@ export interface SttService {
   transcribe(audio: Blob, opts?: { language?: "zh" | "en" | "auto" }): Promise<Result<{ text: string; language: string }>>;
 }
 
-/** Image OCR (P2). */
+export type OcrLine = { text: string; box?: [number, number, number, number] };
+
+/** Image OCR. Implementations may return absolute pixel boxes for overlay UI. */
 export interface OcrService {
   available(): boolean;
-  extract(image: Blob): Promise<Result<{ lines: { text: string }[] }>>;
+  extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>>;
 }
 
 /** Word/phrase lookup against the local dictionary. */

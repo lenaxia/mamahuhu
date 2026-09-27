@@ -161,10 +161,23 @@ export const HanziWordSchema = RenderedWordSchema.extend({ known: z.boolean() })
 export const HanziResSchema = z.object({ words: z.array(HanziWordSchema) });
 export type HanziRes = z.infer<typeof HanziResSchema>;
 
-export const OcrWordSchema = RenderedWordSchema.extend({ known: z.boolean(), saved: z.boolean() });
+export const BoxSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);
+export type Box = z.infer<typeof BoxSchema>;
+
+export const OcrWordSchema = RenderedWordSchema.extend({
+  known: z.boolean(),
+  saved: z.boolean(),
+  /** absolute pixel box on the UPLOADED image (x1,y1,x2,y2); absent in fallback mode */
+  box: BoxSchema.optional(),
+});
 export const OcrResSchema = z.object({
+  /** image dimensions the boxes refer to */
+  width: z.number().optional(),
+  height: z.number().optional(),
   lines: z.array(z.object({ words: z.array(OcrWordSchema) })),
   fullText: z.string(),
+  /** true when boxes are present (overlay mode) */
+  positioned: z.boolean(),
 });
 export type OcrRes = z.infer<typeof OcrResSchema>;
 

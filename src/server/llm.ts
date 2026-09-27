@@ -1,6 +1,6 @@
 import { LlmTranslateSchema, type CardVariant } from "../shared/api";
 import { marksToNumbered, numberedToBpmf, numberedToMarks } from "../shared/bpmf";
-import type { ChatClient, ChatMessage, ChatOptions, Result, TranslationService, TtsService, SttService, OcrService } from "./ports";
+import type { ChatClient, ChatMessage, ChatOptions, Result, TranslationService, TtsService, SttService, OcrService, OcrLine } from "./ports";
 
 const isHan = (ch: string): boolean => /\p{Script=Han}/u.test(ch);
 const countHanzi = (s: string): number => [...s].filter(isHan).length;
@@ -293,7 +293,7 @@ export class UnavailableStt implements SttService {
 export class GatewayOcrService implements OcrService {
   constructor(private cfg: { base: string; key: string; model: string }) {}
   available(): boolean { return true; }
-  async extract(image: Blob): Promise<Result<{ lines: { text: string }[] }>> {
+  async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
     try {
       const b64 = Buffer.from(await image.arrayBuffer()).toString("base64");
       const res = await fetch(`${this.cfg.base}/chat/completions`, {
@@ -302,17 +302,17 @@ export class GatewayOcrService implements OcrService {
         body: JSON.stringify({
           model: this.cfg.model,
           temperature: 0,
-          max_tokens: 2000,
+          max_tokens: 3000,
           messages: [
             {
               role: "system",
               content:
-                "You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe ALL Han character text line by line. Return ONLY the transcribed lines as plain text, one line per line of text. Ignore bopomofo/zhuyin annotation symbols, Latin letters and handwriting unless they are the only content.",
+                'You are an OCR engine for photos of Chinese text (Taiwan children\'s books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2]}]} where box is the tight absolute-pixel bounding box of that line of text in the provided image (x1<x2, y1<y2). Omit box if unsure — never invent coordinates.',
             },
             {
               role: "user",
               content: [
-                { type: "text", text: "Transcribe the Chinese text in this image." },
+                { type: "text", text: "Transcribe the Chinese text with bounding boxes." },
                 { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
               ],
             },
@@ -321,14 +321,30 @@ export class GatewayOcrService implements OcrService {
       });
       if (!res.ok) return { ok: false, error: `ocr gateway ${res.status}: ${(await res.text()).slice(0, 200)}` };
       const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      const text = data.choices?.[0]?.message?.content ?? "";
-      if (!text.trim()) return { ok: false, error: "ocr returned no text" };
-      const lines = text
+      const raw = data.choices?.[0]?.message?.content ?? "";
+      if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
+
+      const lines: OcrLine[] = [];
+      const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown }[] } | null;
+      if (parsed?.items?.length) {
+        for (const it of parsed.items) {
+          if (typeof it.text !== "string" || !it.text.trim()) continue;
+          const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
+          const box =
+            b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
+              ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
+              : undefined;
+          lines.push({ text: it.text.trim(), box });
+        }
+        if (lines.length) return { ok: true, value: { lines } };
+      }
+      // fallback: plain-text lines, no boxes
+      const plain = raw
         .split("\n")
         .map((l) => l.trim())
         .filter(Boolean)
         .map((t) => ({ text: t }));
-      return { ok: true, value: { lines } };
+      return plain.length ? { ok: true, value: { lines: plain } } : { ok: false, error: "ocr returned no text" };
     } catch (e) {
       return { ok: false, error: `ocr failed: ${String(e)}` };
     }
@@ -337,8 +353,8 @@ export class GatewayOcrService implements OcrService {
 
 export class MockOcrService implements OcrService {
   available(): boolean { return true; }
-  async extract(): Promise<Result<{ lines: { text: string }[] }>> {
-    return { ok: true, value: { lines: [{ text: "小貓在睡覺" }] } };
+  async extract(): Promise<Result<{ lines: OcrLine[] }>> {
+    return { ok: true, value: { lines: [{ text: "小貓在睡覺", box: [20, 30, 560, 110] }] } };
   }
 }
 
