@@ -170,6 +170,10 @@ export function PhotoPage({
             onLoad={() => { if (imgRef.current) setImgScale(imgRef.current.clientWidth / (w || imgRef.current.naturalWidth || 1)); }}
           />
 
+        </div>
+
+          {/* chips render OUTSIDE the transform: iOS rasterizes transformed layers
+              at layout size — scaling blurs text. Position via zoom state = crisp pixels. */}
           {page.positioned &&
             imgScale > 0 &&
             page.lines.flatMap((line, li) =>
@@ -178,8 +182,9 @@ export function PhotoPage({
                 .map((wd, wi) => {
                   const [x1, y1, x2, y2] = wd.box!;
                   const isSaved = wd.saved || savedNow.has(wd.traditional);
-                  const boxH = (y2 - y1) * imgScale;
-                  const boxW = (x2 - x1) * imgScale;
+                  const z = view.s;
+                  const boxH = (y2 - y1) * imgScale * z;
+                  const boxW = (x2 - x1) * imgScale * z;
                   const chars = [...wd.traditional];
                   const n = chars.length || 1;
                   // direction from the model; aspect fallback when absent.
@@ -188,8 +193,8 @@ export function PhotoPage({
                   // shrink-to-fit: CJK glyph ≈ 1em wide/tall; subtract border+padding.
                   // no floor above ~6 — tiny poster boxes must win over legibility
                   const fontSize = tall
-                    ? Math.max(6, Math.min((boxW - 4) * 0.9, ((boxH - 4) / n) * 0.95, 40))
-                    : Math.max(6, Math.min((boxH - 4) * 0.85, (boxW - 4) / n, 40));
+                    ? Math.max(6, Math.min((boxW - 4) * 0.9, ((boxH - 4) / n) * 0.95, 56))
+                    : Math.max(6, Math.min((boxH - 4) * 0.85, (boxW - 4) / n, 56));
                   // visible chip hugs the text (model boxes carry padding), centered in the box
                   const chipW = tall ? Math.min(boxW, fontSize * 1.35) : Math.min(boxW, n * fontSize * 1.18);
                   const chipH = tall ? Math.min(boxH, n * fontSize * 1.15) : Math.min(boxH, fontSize * 1.4);
@@ -199,8 +204,8 @@ export function PhotoPage({
                       data-ocr-word={wd.traditional}
                       onClick={() => setOcrWord(ocrWord?.traditional === wd.traditional ? null : wd)}
                       style={{
-                        left: x1 * imgScale + (boxW - chipW) / 2,
-                        top: y1 * imgScale + (boxH - chipH) / 2,
+                        left: view.x + x1 * imgScale * z + (boxW - chipW) / 2,
+                        top: view.y + y1 * imgScale * z + (boxH - chipH) / 2,
                         width: chipW,
                         height: chipH,
                         fontSize,
@@ -220,6 +225,7 @@ export function PhotoPage({
                   );
                 }),
             )}
+
 
           {page.positioned && imgScale > 0 && ocrWord?.box &&
             (() => {
@@ -246,7 +252,6 @@ export function PhotoPage({
                 </div>
               );
             })()}
-        </div>
 
         {/* zoom controls */}
         {imgScale > 0 && (
