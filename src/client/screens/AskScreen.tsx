@@ -56,7 +56,29 @@ export function AskScreen(): React.JSX.Element {
   const recognizer = useRef<BrowserRecognizer | null>(null);
   const micRec = useRef<MicRecorder | null>(null);
   const meter = useRef<LevelMeter | null>(null);
+  const fakeWave = useRef<number>(0);
+  const fakeRaf = useRef(0);
   const [levels, setLevels] = useState<number[]>([]);
+
+  /** browser-mode waveform: synthetic amplitude so we never open a second
+   *  getUserMedia (iOS kills the recognizer) — same render path as real bars */
+  function startFakeWave(): void {
+    const t0 = performance.now();
+    const tick = () => {
+      fakeRaf.current = requestAnimationFrame(tick);
+      const t = (performance.now() - t0) / 1000;
+      const bars = Array.from({ length: 24 }, (_, i) =>
+        Math.min(1, Math.max(0.08, 0.35 + 0.3 * Math.sin(t * 7 + i * 0.55) + 0.25 * Math.sin(t * 2.3 + i * 1.7))),
+      );
+      setLevels(bars);
+    };
+    fakeRaf.current = requestAnimationFrame(tick);
+  }
+
+  function stopFakeWave(): void {
+    cancelAnimationFrame(fakeRaf.current);
+    setLevels([]);
+  }
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const anythingActive =
@@ -188,7 +210,7 @@ export function AskScreen(): React.JSX.Element {
       setListening(false);
       meter.current?.stop();
       meter.current = null;
-      setLevels([]);
+      stopFakeWave();
       if (micRec.current?.active) {
         try {
           const blob = await micRec.current.stop();
@@ -210,7 +232,7 @@ export function AskScreen(): React.JSX.Element {
       return;
     }
     reset();
-    setLevels([]); // empty levels = CSS-animated wave (browser mode)
+    stopFakeWave();
     if (sttServerMode()) {
       const rec = new MicRecorder();
       micRec.current = rec;
@@ -229,6 +251,7 @@ export function AskScreen(): React.JSX.Element {
       setError("Speech recognition is not supported in this browser");
       return;
     }
+    startFakeWave();
     const r = new BrowserRecognizer();
     recognizer.current = r;
     setListening(true);
@@ -240,7 +263,7 @@ export function AskScreen(): React.JSX.Element {
         setInterim("");
         meter.current?.stop();
         meter.current = null;
-        setLevels([]);
+        stopFakeWave();
         setSpokenConfidence(confidence ?? null);
         if (!finalText) return;
         setSpokenText(finalText);
@@ -252,7 +275,7 @@ export function AskScreen(): React.JSX.Element {
         setError(m);
         meter.current?.stop();
         meter.current = null;
-        setLevels([]);
+        stopFakeWave();
       },
       (lang) => void lang,
     );
@@ -287,21 +310,13 @@ export function AskScreen(): React.JSX.Element {
           />
           {listening && (
             <div className="pointer-events-none absolute inset-x-3 bottom-1 flex h-4 items-center justify-center gap-[2px]">
-              {levels.length > 0
-                ? Array.from({ length: 24 }).map((_, i) => (
-                    <span
-                      key={i}
-                      className="w-[3px] rounded-full bg-red-500"
-                      style={{ height: `${Math.max(8, (levels[i] ?? 0) * 100)}%`, transition: "height 60ms" }}
-                    />
-                  ))
-                : Array.from({ length: 24 }).map((_, i) => (
-                    <span
-                      key={i}
-                      className="w-[3px] rounded-full bg-red-500/70 animate-pulse"
-                      style={{ height: `${20 + 60 * Math.abs(Math.sin(i))}%`, animationDelay: `${i * 60}ms` }}
-                    />
-                  ))}
+              {Array.from({ length: 24 }).map((_, i) => (
+                <span
+                  key={i}
+                  className="w-[3px] rounded-full bg-red-500"
+                  style={{ height: `${Math.max(8, (levels[i] ?? 0) * 100)}%`, transition: "height 60ms" }}
+                />
+              ))}
             </div>
           )}
         </div>
