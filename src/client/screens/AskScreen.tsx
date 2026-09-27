@@ -1,5 +1,5 @@
 import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { CandidateCard, HanziWordCard, InterpretationCard } from "../components/Cards";
 import { PhotoPage } from "../components/PhotoPage";
@@ -7,6 +7,8 @@ import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
 import { IconCamera, IconClose, IconKeyboard, IconMic, IconSend } from "../components/Icons";
 import { useMe } from "../state";
+import { BrowserRecognizer, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
+import type { SttRes } from "../../shared/api";
 
 type Mode = "type" | "speak" | "photo";
 
@@ -56,6 +58,13 @@ export function AskScreen(): React.JSX.Element {
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
   const [ocrBusy, setOcrBusy] = useState(false);
   const [photo, setPhoto] = useState<{ url: string; w: number; h: number } | null>(null);
+  const [sttLang, setSttLang] = useState<"zh-TW" | "en-US">("zh-TW");
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [sttBusy, setSttBusy] = useState(false);
+  const [sttResult, setSttResult] = useState<SttRes | null>(null);
+  const recognizer = useRef<BrowserRecognizer | null>(null);
+  const micRec = useRef<MicRecorder | null>(null);
 
   function reset(): void {
     setError(null);
@@ -69,6 +78,9 @@ export function AskScreen(): React.JSX.Element {
     setSavedNow(new Set());
     if (photo) URL.revokeObjectURL(photo.url);
     setPhoto(null);
+    setInterim("");
+    setSttResult(null);
+    setListening(false);
   }
 
   async function onPhoto(file: File | null): Promise<void> {
@@ -133,6 +145,80 @@ export function AskScreen(): React.JSX.Element {
     if (!pinyinOk || forcedTranslate) await runTranslate(t);
   }
 
+  async function handleSttRes(res: SttRes): Promise<void> {
+    setSttResult(res);
+    if (res.route === "text") return;
+    // nothing else: response already carries the routed payload
+  }
+
+  async function toggleMic(): Promise<void> {
+    setError(null);
+    if (listening) {
+      setListening(false);
+      if (micRec.current?.active) {
+        try {
+          const blob = await micRec.current.stop();
+          setSttBusy(true);
+          await handleSttRes(await api.stt(blob));
+        } catch (e) {
+          setError(e instanceof ApiError ? e.message : "Transcription failed");
+        } finally {
+          setSttBusy(false);
+        }
+        return;
+      }
+      recognizer.current?.stop();
+      return;
+    }
+    reset();
+    if (sttServerMode()) {
+      const rec = new MicRecorder();
+      micRec.current = rec;
+      const ok = await rec.start((m) => setError(m));
+      if (ok) setListening(true);
+      return;
+    }
+    if (!browserSttSupported()) {
+      setError("Speech recognition is not supported in this browser");
+      return;
+    }
+    const r = new BrowserRecognizer();
+    recognizer.current = r;
+    setListening(true);
+    r.start(
+      sttLang,
+      (t) => setInterim(t),
+      (finalText) => {
+        setListening(false);
+        setInterim("");
+        if (!finalText) return;
+        // route through the normal type pipeline (hanzi or translate)
+        setText(finalText);
+        void submitSpoken(finalText);
+      },
+      (m) => {
+        setListening(false);
+        setError(m);
+      },
+    );
+  }
+
+  async function submitSpoken(t: string): Promise<void> {
+    setError(null);
+    if (/\p{Script=Han}/u.test(t)) {
+      setBusy("lookup");
+      try {
+        setHanziWords((await api.hanzi(t)).words);
+      } catch {
+        setError("Lookup failed");
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+    await runTranslate(t);
+  }
+
   return (
     <div className="space-y-4">
       <Segmented<Mode>
@@ -141,11 +227,51 @@ export function AskScreen(): React.JSX.Element {
         onChange={setMode}
         options={[
           { value: "type", label: <span className="flex items-center justify-center gap-1.5"><IconKeyboard className="h-4 w-4" /> Type</span> },
-          { value: "speak", label: <span className="flex items-center justify-center gap-1.5"><IconMic className="h-4 w-4" /> Speak</span>, disabled: true },
+          { value: "speak", label: <span className="flex items-center justify-center gap-1.5"><IconMic className="h-4 w-4" /> Speak</span> },
           { value: "photo", label: <span className="flex items-center justify-center gap-1.5"><IconCamera className="h-4 w-4" /> Photo</span> },
         ]}
       />
-      <p className="-mt-2 text-center text-[11px] text-neutral-400">Speak arrives next</p>
+
+
+      {mode === "speak" && (
+        <div className="space-y-4">
+          <Segmented<"zh-TW" | "en-US">
+            value={sttLang}
+            onChange={setSttLang}
+            options={[
+              { value: "zh-TW", label: "中文" },
+              { value: "en-US", label: "English" },
+            ]}
+          />
+          <div className="flex flex-col items-center gap-3 py-6">
+            <button
+              aria-label={listening ? "Stop" : "Record"}
+              onClick={() => void toggleMic()}
+              className={`flex h-24 w-24 items-center justify-center rounded-full text-white shadow-lg transition ${
+                listening ? "bg-red-500 scale-105 animate-pulse" : "bg-amber-500 active:scale-95"
+              }`}
+            >
+              <IconMic className="h-10 w-10" />
+            </button>
+            <p className="text-sm text-neutral-400">
+              {sttBusy ? "Transcribing…" : listening ? "listening… tap to stop" : sttServerMode() ? "tap to record" : browserSttSupported() ? "tap and speak" : "not supported in this browser"}
+            </p>
+            {interim && <p className="hanzi text-lg">{interim}</p>}
+          </div>
+          {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
+          {sttResult && (
+            <div className="space-y-3">
+              <div className="text-xs uppercase tracking-wide text-neutral-400">heard: “{sttResult.text}”</div>
+              {sttResult.route === "hanzi" &&
+                sttResult.hanzi?.words.map((w, i) => (
+                  <HanziWordCard key={i} word={w} onSaved={(t) => setSavedNow((sv) => new Set(sv).add(t))} />
+                ))}
+              {sttResult.route === "translate" && sttResult.translate && <ResultCard card={sttResult.translate} />}
+              {sttResult.route === "text" && <p className="text-sm text-neutral-400">transcript only — no translation available</p>}
+            </div>
+          )}
+        </div>
+      )}
 
       {mode === "photo" && (
         <div className="space-y-4">

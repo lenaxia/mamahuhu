@@ -428,3 +428,23 @@ describe("DATA_DIR storage root", () => {
     }
   });
 });
+
+describe("speak (mocked STT, auto-routing)", () => {
+  it("zh transcript routes to hanzi cards and is recorded", async () => {
+    const form = new FormData();
+    form.append("audio", new Blob([new Uint8Array(512).fill(2)], { type: "audio/webm" }), "clip.webm");
+    const res = await app.request("/api/ask/stt", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.text).toBe("我要睡覺");
+    expect(body.route).toBe("hanzi");
+    expect(body.hanzi.words.map((w: { traditional: string }) => w.traditional)).toContain("睡覺");
+    const list = await (await app.request("/api/history", { headers: H })).json();
+    expect(list.some((i: { kind: string; input: string }) => i.kind === "stt" && i.input === "我要睡覺")).toBe(true);
+  });
+
+  it("audio is required", async () => {
+    const res = await app.request("/api/ask/stt", { method: "POST", headers: H, body: new FormData() });
+    expect(res.status).toBe(400);
+  });
+});

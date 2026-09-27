@@ -181,6 +181,16 @@ export const OcrResSchema = z.object({
 });
 export type OcrRes = z.infer<typeof OcrResSchema>;
 
+/** POST /api/ask/stt — transcript + auto-routed payload */
+export const SttResSchema = z.object({
+  text: z.string(),
+  language: z.string(),
+  route: z.enum(["hanzi", "translate", "text"]),
+  hanzi: HanziResSchema.optional(),
+  translate: TranslateResSchema.optional(),
+});
+export type SttRes = z.infer<typeof SttResSchema>;
+
 // ---- entries ----
 
 export const CreateEntryReqSchema = z.object({
@@ -234,7 +244,7 @@ export type ListEntriesRes = z.infer<typeof ListEntriesResSchema>;
 
 // ---- history (every ask, saved or not) ----
 
-export const AskKindSchema = z.enum(["translate", "pinyin", "hanzi", "ocr"]);
+export const AskKindSchema = z.enum(["translate", "pinyin", "hanzi", "ocr", "stt"]);
 export type AskKind = z.infer<typeof AskKindSchema>;
 
 export const HistoryItemSchema = z.object({

@@ -22,6 +22,7 @@ import {
   PinyinReqSchema,
   PinyinResSchema,
   RegisterSchema,
+  SttResSchema,
   TranslateReqSchema,
   TranslateResSchema,
   type Annotations,
@@ -36,9 +37,11 @@ import { identityMiddleware, isProxyAuth } from "./auth";
 import {
   GatewayChatClient,
   GatewayOcrService,
+  GatewaySttService,
   GatewayTtsService,
   LlmTranslationService,
   MockOcrService,
+  MockSttService,
   MockTranslationService,
   UnavailableStt,
   UnavailableTts,
@@ -209,7 +212,14 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
   const tts: TtsService = useServerTts
     ? new GatewayTtsService({ base, key, model: ttsModel, voice: process.env.TTS_VOICE ?? "zf_xiaoxiao" })
     : new UnavailableTts();
-  const stt: SttService = new UnavailableStt();
+  const sttModel = process.env.MODEL_STT ?? "";
+  const sttMode = (process.env.STT_MODE ?? "auto") as "auto" | "server" | "browser";
+  const stt: SttService =
+    mock
+      ? new MockSttService()
+      : sttModel && sttMode !== "browser"
+        ? new GatewaySttService({ base, key, model: sttModel })
+        : new UnavailableStt();
   const visionModel = process.env.MODEL_VISION ?? "default";
   const ocr: OcrService = mock ? new MockOcrService() : new GatewayOcrService({ base, key, model: visionModel });
 
@@ -364,6 +374,65 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
     }
     const payload = OcrResSchema.parse({ lines, fullText: lineTexts.join("\n"), positioned });
     await recordAsk(sql, user.id, "ocr", lineTexts.join(" ").slice(0, 200), payload, stored);
+    return c.json(payload);
+  });
+
+  // ---- ask: speak (STT) with auto-routing ----
+  app.get("/api/stt/status", (c) => c.json({ available: stt.available(), mode: stt.available() ? "server" : "browser" }));
+
+  app.post("/api/ask/stt", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.parseBody().catch(() => null);
+    const audio = body && "audio" in body ? (body.audio as File) : null;
+    if (!audio || audio.size < 10 || audio.size > 25 * 1024 * 1024) {
+      return c.json({ error: "audio required (max 25MB)" }, 400);
+    }
+    const res = await deps.stt.transcribe(audio);
+    if (!res.ok) return c.json({ error: res.error }, 502);
+    const { text, language } = res.value;
+
+    const hanziLookup = (seg: string): z.infer<typeof HanziWordSchema> | null => {
+      const hit = dictionary.byTrad.get(seg)?.[0];
+      return hit && hit.traditional === seg ? { ...renderWord(hit), known: true } : null;
+    };
+    const hanziFor = (t: string) => {
+      const words: z.infer<typeof HanziWordSchema>[] = [];
+      for (const seg of segmentHanzi(t)) {
+        const direct = hanziLookup(seg);
+        if (direct) { words.push({ ...direct, known: true }); continue; }
+        for (const ch of [...seg]) {
+          words.push(hanziLookup(ch) ?? { traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false });
+        }
+      }
+      return HanziResSchema.parse({ words });
+    };
+
+    if (isHan(text)) {
+      const hanzi = hanziFor(text);
+      const payload = SttResSchema.parse({ text, language, route: "hanzi", hanzi });
+      await recordAsk(sql, user.id, "stt", text, payload);
+      return c.json(payload);
+    }
+    const tr = await deps.translations.translate(text);
+    if (tr.ok) {
+      const casual = buildSyllables(tr.value.casual, dictionary);
+      const formal = buildSyllables(tr.value.formal, dictionary);
+      const translate = TranslateResSchema.parse({
+        source: text,
+        register: "casual",
+        casual: tr.value.casual,
+        formal: tr.value.formal,
+        syllables: casual.syllables,
+        formalSyllables: tr.value.formal.pinyin !== tr.value.casual.pinyin ? formal.syllables : undefined,
+        lowConfidence: casual.lowConfidence || formal.lowConfidence || undefined,
+      });
+      const payload = SttResSchema.parse({ text, language, route: "translate", translate });
+      await recordAsk(sql, user.id, "stt", text, payload);
+      return c.json(payload);
+    }
+    // transcript only — no routing possible
+    const payload = SttResSchema.parse({ text, language, route: "text" });
+    await recordAsk(sql, user.id, "stt", text, payload);
     return c.json(payload);
   });
 

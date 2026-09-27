@@ -10,6 +10,7 @@ import type {
   PatchEntryReq,
   PatchMeReq,
   PinyinRes,
+  SttRes,
   TranslateRes,
 } from "../shared/api";
 
@@ -85,6 +86,19 @@ export const api = {
   deleteEntry: (id: string) => req<void>(`/api/entries/${id}`, { method: "DELETE" }),
 
   ttsStatus: () => req<{ available: boolean }>("/api/tts/status"),
+
+  sttStatus: () => req<{ available: boolean; mode: string }>("/api/stt/status"),
+  stt: (audio: Blob): Promise<SttRes> =>
+    (async () => {
+      const headers = new Headers();
+      const du = devUser();
+      if (du) headers.set("x-dev-user", du);
+      const form = new FormData();
+      form.append("audio", audio, "clip.webm");
+      const res = await fetch("/api/ask/stt", { method: "POST", headers, body: form });
+      if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error ?? `${res.status}`);
+      return (await res.json()) as SttRes;
+    })(),
 
   history: () => req<HistoryItem[]>("/api/history"),
   historyDetail: (id: string) => req<HistoryDetail>(`/api/history/${id}`),

@@ -284,6 +284,37 @@ export class GatewayTtsService implements TtsService {
   }
 }
 
+export class GatewaySttService implements SttService {
+  constructor(private cfg: { base: string; key: string; model: string }) {}
+  available(): boolean { return true; }
+  async transcribe(audio: Blob, opts?: { language?: "zh" | "en" | "auto" }): Promise<Result<{ text: string; language: string }>> {
+    try {
+      const form = new FormData();
+      form.append("file", audio, "clip.webm");
+      form.append("model", this.cfg.model);
+      if (opts?.language && opts.language !== "auto") form.append("language", opts.language);
+      const res = await fetch(`${this.cfg.base}/audio/transcriptions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${this.cfg.key}` },
+        body: form,
+      });
+      if (!res.ok) return { ok: false, error: `stt gateway ${res.status}: ${(await res.text()).slice(0, 200)}` };
+      const data = (await res.json()) as { text?: string; language?: string };
+      if (!data.text?.trim()) return { ok: false, error: "stt returned no text" };
+      return { ok: true, value: { text: data.text.trim(), language: data.language ?? "zh" } };
+    } catch (e) {
+      return { ok: false, error: `stt failed: ${String(e)}` };
+    }
+  }
+}
+
+export class MockSttService implements SttService {
+  available(): boolean { return true; }
+  async transcribe(): Promise<Result<{ text: string; language: string }>> {
+    return { ok: true, value: { text: "我要睡覺", language: "zh" } };
+  }
+}
+
 export class UnavailableStt implements SttService {
   available(): boolean { return false; }
   async transcribe(): Promise<Result<{ text: string; language: string }>> {

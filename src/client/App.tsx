@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { MeProvider, useMe } from "./state";
 import { initTts } from "./tts";
+import { initStt } from "./stt";
 import { AskScreen } from "./screens/AskScreen";
 import { WordsScreen } from "./screens/WordsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
@@ -27,6 +28,7 @@ function Shell(): React.JSX.Element {
 
   useEffect(() => {
     void initTts();
+    void initStt();
   }, []);
 
   return (
