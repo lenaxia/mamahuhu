@@ -185,9 +185,11 @@ export function PhotoPage({
                   // direction from the model; aspect fallback when absent.
                   // text must FIT the box: tall boxes stack chars vertically.
                   const tall = wd.dir === "v" || (wd.dir !== "h" && boxH > boxW * 1.25 && n > 1);
+                  // shrink-to-fit: CJK glyph ≈ 1em wide/tall; subtract border+padding.
+                  // no floor above ~6 — tiny poster boxes must win over legibility
                   const fontSize = tall
-                    ? Math.max(9, Math.min(boxW * 0.85, (boxH / n) * 0.9, 40))
-                    : Math.max(10, Math.min(boxH * 0.78, boxW / (n * 1.2), 40));
+                    ? Math.max(6, Math.min((boxW - 4) * 0.9, ((boxH - 4) / n) * 0.95, 40))
+                    : Math.max(6, Math.min((boxH - 4) * 0.85, (boxW - 4) / n, 40));
                   return (
                     <button
                       key={`${li}-${wi}`}
