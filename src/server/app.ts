@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync as readFileSyncSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { serveStatic } from "@hono/node-server/serve-static";
 import {
@@ -862,8 +862,9 @@ async function buildPhrase(
   // ---- static SPA (production; in dev vite serves the client) ----
   if (existsSync("./dist/web")) {
     type Env = { Variables: { user: UserRow } };
+    app.get("/", (c) => c.html(readFileSyncSync("./dist/web/index.html", "utf8"), 200, { "cache-control": "no-store" }));
     app.use("*", serveStatic<Env>({ root: "./dist/web" }));
-    app.get("*", serveStatic<Env>({ root: "./dist/web", path: "/index.html" }));
+    app.get("*", (c) => c.html(readFileSyncSync("./dist/web/index.html", "utf8"), 200, { "cache-control": "no-store" }));
   }
 
   return { app, deps };
