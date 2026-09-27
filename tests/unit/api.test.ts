@@ -448,3 +448,29 @@ describe("speak (mocked STT, auto-routing)", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("phrase card", () => {
+  it("multi-word hanzi input includes a whole-phrase card", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "恭喜發財紅包拿來" }),
+    });
+    const body = await res.json();
+    expect(body.words.length).toBeGreaterThanOrEqual(3);
+    expect(body.phrase).toBeTruthy();
+    expect(body.phrase.traditional).toBe("恭喜發財紅包拿來");
+    expect(body.phrase.pinyin).toContain("gōng xǐ");
+    expect(body.phrase.english).toBe("mock phrase gloss");
+  });
+
+  it("single-word input has no phrase card", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "睡覺" }),
+    });
+    const body = await res.json();
+    expect(body.phrase).toBeUndefined();
+  });
+});

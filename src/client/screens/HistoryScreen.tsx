@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HistoryDetail, HistoryItem, HanziRes, Interpretation, OcrRes, SttRes, TranslateRes } from "../../shared/api";
 import { api, ApiError } from "../api";
-import { InterpretationCard, HanziWordCard } from "../components/Cards";
+import { InterpretationCard, HanziWordCard, PhraseCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
 import { PhotoPage } from "../components/PhotoPage";
 import { Sheet } from "../components/Sheet";

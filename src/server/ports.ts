@@ -41,6 +41,8 @@ export interface TranslateOptions {
 /** EN → ZH translation with both registers + alternative senses (each with registers). Deterministic under mock. */
 export interface TranslationService {
   translate(text: string, opts?: TranslateOptions): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: AltSense[] }>>;
+  /** natural one-line English gloss of a Mandarin phrase (zh→en) */
+  glossZh(text: string): Promise<Result<string>>;
 }
 
 /** Text-to-speech. Implementations: gateway model, or unavailable (client falls back to browser). */

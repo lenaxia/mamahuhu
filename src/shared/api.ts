@@ -158,7 +158,15 @@ export type PinyinRes = z.infer<typeof PinyinResSchema>;
 
 export const HanziReqSchema = z.object({ text: z.string().trim().min(1).max(200) });
 export const HanziWordSchema = RenderedWordSchema.extend({ known: z.boolean() });
-export const HanziResSchema = z.object({ words: z.array(HanziWordSchema) });
+export const HanziPhraseSchema = z.object({
+  traditional: z.string(),
+  simplified: z.string(),
+  pinyin: z.string(),
+  bpmf: z.string(),
+  english: z.string(),
+});
+export type HanziPhrase = z.infer<typeof HanziPhraseSchema>;
+export const HanziResSchema = z.object({ words: z.array(HanziWordSchema), phrase: HanziPhraseSchema.optional() });
 export type HanziRes = z.infer<typeof HanziResSchema>;
 
 export const BoxSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);

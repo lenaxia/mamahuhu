@@ -10,6 +10,7 @@ import {
   HanziReqSchema,
   HanziResSchema,
   HanziWordSchema,
+  HanziPhraseSchema,
   ListEntriesResSchema,
   MeSchema,
   OcrResSchema,
@@ -225,6 +226,23 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
 
   const deps: AppDeps = { sql, dictionary, translations, tts, stt, ocr, sources: new Set() };
 
+/** whole-utterance card for multi-word hanzi input: per-word pinyin + LLM phrase gloss */
+async function buildPhrase(
+  text: string,
+  words: z.infer<typeof HanziWordSchema>[],
+): Promise<z.infer<typeof HanziPhraseSchema> | undefined> {
+  if (words.length < 2) return undefined;
+  const gloss = await deps.translations.glossZh(text);
+  if (!gloss.ok) return undefined;
+  return {
+    traditional: words.map((w) => w.traditional).join(""),
+    simplified: words.map((w) => w.simplified).join(""),
+    pinyin: words.map((w) => w.pinyin).filter(Boolean).join(" "),
+    bpmf: words.map((w) => w.bpmf).filter(Boolean).join(" "),
+    english: gloss.value,
+  };
+}
+
   const app: App = new Hono<{ Variables: { user: UserRow } }>();
 
   app.get("/healthz", (c) => c.json({ ok: true, dictEntries: dictionary.count }));
@@ -314,7 +332,10 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
         words.push(lookup(ch) ?? { traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false });
       }
     }
-    const payload = HanziResSchema.parse({ words });
+    const payload = HanziResSchema.parse({
+      words,
+      phrase: words.length > 1 ? await buildPhrase(parsed.data.text, words) : undefined,
+    });
     await recordAsk(sql, c.get("user").id, "hanzi", parsed.data.text, payload);
     return c.json(payload);
   });
@@ -408,7 +429,9 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
     };
 
     if (isHan(text)) {
-      const hanzi = hanziFor(text);
+      const words = hanziFor(text).words;
+      const phrase = words.length > 1 ? await buildPhrase(text, words) : undefined;
+      const hanzi = HanziResSchema.parse({ words, phrase });
       const payload = SttResSchema.parse({ text, language, route: "hanzi", hanzi });
       await recordAsk(sql, user.id, "stt", text, payload);
       return c.json(payload);

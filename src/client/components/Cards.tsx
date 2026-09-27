@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { EntrySource, Interpretation, RenderedWord, Syllables } from "../../shared/api";
+import type { EntrySource, HanziPhrase, Interpretation, RenderedWord, Syllables } from "../../shared/api";
 import { stripToneMarks } from "../../shared/bpmf";
 import { wordChars } from "../../shared/fuzzy";
 import { api } from "../api";
@@ -119,6 +119,36 @@ export function CandidateCard({ word }: { word: RenderedWord }) {
       <AnnotatedText syllables={syllables} annotations={annotations} />
       <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{word.english.split(" / ").slice(0, 3).join("; ")}</p>
       <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} />
+    </div>
+  );
+}
+
+/** Whole-utterance card for multi-word hanzi (spoken phrases, pasted text). */
+export function PhraseCard({
+  phrase,
+  words,
+  source,
+}: {
+  phrase: HanziPhrase;
+  words: RenderedWord[];
+  source: EntrySource;
+}): React.JSX.Element {
+  const annotations = useAnnotations();
+  const { saved, save } = useSaver(source);
+  const syllables: Syllables = [words.flatMap(wordChars)];
+  const asWord: RenderedWord = {
+    traditional: phrase.traditional,
+    simplified: phrase.simplified,
+    pinyin: phrase.pinyin,
+    bpmf: phrase.bpmf,
+    english: phrase.english,
+  };
+  return (
+    <div data-traditional={phrase.traditional} className="rounded-2xl border-2 border-amber-300 dark:border-amber-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
+      <div className="text-xs uppercase tracking-wide text-amber-600 dark:text-amber-400">whole phrase</div>
+      <AnnotatedText syllables={syllables} annotations={annotations} />
+      <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{phrase.english}</p>
+      <ActionRow text={phrase.traditional} saved={saved} onSave={() => void save(asWord, syllables)} />
     </div>
   );
 }

@@ -160,6 +160,19 @@ export class LlmTranslationService implements TranslationService {
     }
     return { ok: false, error: "translation model returned an unusable response (syllable/character mismatch)" };
   }
+
+  async glossZh(text: string): Promise<Result<string>> {
+    const res = await this.chat.complete(
+      [
+        { role: "system", content: "Translate this Mandarin phrase into natural English. Reply with ONLY the translation on one line — no pinyin, no notes, no quotes." },
+        { role: "user", content: text },
+      ],
+      { model: this.model, temperature: 0.2, maxTokens: 120 },
+    );
+    if (!res.ok) return res;
+    const gloss = res.value.trim().replace(/^["'「」]+|["'「」]+$/g, "");
+    return gloss ? { ok: true, value: gloss } : { ok: false, error: "empty gloss" };
+  }
 }
 
 export class MockTranslationService implements TranslationService {
@@ -248,6 +261,10 @@ export class MockTranslationService implements TranslationService {
         }),
       },
     };
+  }
+
+  async glossZh(text: string): Promise<Result<string>> {
+    return { ok: true, value: text.includes("睡覺") ? "I want to sleep." : "mock phrase gloss" };
   }
 }
 

@@ -1,7 +1,7 @@
 import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
 import { useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import { CandidateCard, HanziWordCard, InterpretationCard } from "../components/Cards";
+import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard } from "../components/Cards";
 import { PhotoPage } from "../components/PhotoPage";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
@@ -52,7 +52,7 @@ export function AskScreen(): React.JSX.Element {
   const [interps, setInterps] = useState<Interpretation[] | null>(null);
   const [cands, setCands] = useState<RenderedWord[] | null>(null);
   const [selectedCand, setSelectedCand] = useState<RenderedWord | null>(null);
-  const [hanziWords, setHanziWords] = useState<HanziRes["words"] | null>(null);
+  const [hanziWords, setHanziWords] = useState<HanziRes | null>(null);
   const [forcedTranslate, setForcedTranslate] = useState(false);
   const [ocrResult, setOcrResult] = useState<OcrRes | null>(null);
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
@@ -121,7 +121,7 @@ export function AskScreen(): React.JSX.Element {
     if (hasHan(t)) {
       setBusy("lookup");
       try {
-        setHanziWords((await api.hanzi(t)).words);
+        setHanziWords(await api.hanzi(t));
       } catch {
         setError("Lookup failed");
       } finally {
@@ -210,7 +210,7 @@ export function AskScreen(): React.JSX.Element {
     if (/\p{Script=Han}/u.test(t)) {
       setBusy("lookup");
       try {
-        setHanziWords((await api.hanzi(t)).words);
+        setHanziWords(await api.hanzi(t));
       } catch {
         setError("Lookup failed");
       } finally {
@@ -263,6 +263,9 @@ export function AskScreen(): React.JSX.Element {
           {sttResult && (
             <div className="space-y-3">
               <div className="text-xs uppercase tracking-wide text-neutral-400">heard: “{sttResult.text}”</div>
+              {sttResult.route === "hanzi" && sttResult.hanzi?.phrase && (
+                <PhraseCard phrase={sttResult.hanzi.phrase} words={sttResult.hanzi.words} source="stt" />
+              )}
               {sttResult.route === "hanzi" &&
                 sttResult.hanzi?.words.map((w, i) => (
                   <HanziWordCard key={i} word={w} onSaved={(t) => setSavedNow((sv) => new Set(sv).add(t))} />
@@ -346,7 +349,9 @@ export function AskScreen(): React.JSX.Element {
 
       {hanziWords && (
         <div className="space-y-3">
-          {hanziWords.map((w, i) => (
+          {hanziWords.phrase && <PhraseCard phrase={hanziWords.phrase} words={hanziWords.words} source="hanzi" />}
+          {hanziWords.phrase && <div className="text-xs uppercase tracking-wide text-neutral-400">words</div>}
+          {hanziWords.words.map((w, i) => (
             <HanziWordCard key={i} word={w} />
           ))}
         </div>
