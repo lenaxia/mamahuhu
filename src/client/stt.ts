@@ -28,22 +28,12 @@ export function browserSttSupported(): boolean {
 
 export type SttLang = "zh-TW" | "en-US";
 
-/**
- * Live browser recognizer with language auto-detection.
- *
- * Flip policy (iOS-tuned): zh-TW recognition can take 4-6s before its FIRST
- * interim (server-assisted on Safari), so we NEVER flip on a blind timer —
- * only on strong signals: Latin words in an interim transcript, or an explicit
- * no-speech error after the session has matured. Flips are reversible (zh → en
- * → zh) but capped at 2 total, and an empty final after a flip re-tries the
- * other language once so Chinese never loses to a premature English switch.
- */
+/** Live browser recognizer with auto language detection: starts zh-TW, flips to
+ *  en-US on Latin interim text (or after 3s of silence), once per session. */
 export class BrowserRecognizer {
   private rec: any = null;
-  private switches = 0;
-  private matured = false;
-  private matureTimer: ReturnType<typeof setTimeout> | null = null;
-  private gotFinal = false;
+  private switched = false;
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private cbs: { onInterim: (t: string) => void; onFinal: (t: string, confidence?: number) => void; onError: (m: string) => void; onLang: (l: SttLang) => void } | null = null;
 
   startAuto(
@@ -52,13 +42,11 @@ export class BrowserRecognizer {
     onError: (msg: string) => void,
     onLang?: (lang: SttLang) => void,
   ): void {
-    this.switches = 0;
-    this.gotFinal = false;
-    this.matured = false;
+    this.switched = false;
     this.cbs = { onInterim, onFinal, onError, onLang: onLang ?? (() => {}) };
     this.spinUp("zh-TW");
-    // only after 5s is a no-speech signal trusted enough to flip
-    this.matureTimer = setTimeout(() => (this.matured = true), 5000);
+    // no interim after 3s → maybe they're speaking English into a zh recognizer
+    this.silenceTimer = setTimeout(() => this.trySwitch("en-US"), 3000);
   }
 
   private spinUp(lang: SttLang): void {
@@ -83,55 +71,47 @@ export class BrowserRecognizer {
         if (r.isFinal) final += r[0].transcript;
         else interim += r[0].transcript;
       }
-      // Latin words while listening as zh → they're speaking English.
-      // Mixed interim (latin + CJK) stays on zh: the zh recognizer embeds
-      // English words far better than en handles Chinese.
-      if (lang === "zh-TW" && interim && /[A-Za-z]{2,}/.test(interim) && !/\p{Script=Han}/u.test(interim)) {
-        this.trySwitch("en-US");
-        return;
+      if (interim) {
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+        // Latin words while listening as zh → they're speaking English.
+        // BUT mixed interim (latin + CJK) stays on zh: the zh recognizer
+        // embeds English words far better than en handles Chinese.
+        if (!this.switched && lang === "zh-TW" && /[A-Za-z]{2,}/.test(interim) && !/\p{Script=Han}/u.test(interim)) {
+          this.trySwitch("en-US");
+          return;
+        }
+        this.cbs?.onInterim(interim);
       }
-      if (interim) this.cbs?.onInterim(interim);
       if (final) {
-        this.gotFinal = true;
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+        // final results carry a 0-1 confidence (Chrome; Safari often 0 = unknown)
         const conf = typeof e.results[e.results.length - 1][0]?.confidence === "number"
-          ? (e.results[e.results.length - 1][0].confidence as number)
+          ? e.results[e.results.length - 1][0].confidence as number
           : undefined;
         this.cbs?.onFinal(final.trim(), conf && conf > 0 ? conf : undefined);
       }
     };
     rec.onerror = (e: any) => {
       const err = e?.error ?? "unknown";
-      // only trust no-speech once the session has had time to warm up,
-      // and only flip if we haven't already burned our switches
-      if (err === "no-speech" && this.matured && this.switches === 0) {
-        this.trySwitch("en-US");
+      if (err === "no-speech" && !this.switched) {
+        this.trySwitch("en-US"); // zh recognizer heard nothing — try English once
         return;
       }
-      if (err === "no-speech" || err === "aborted") return; // benign
       this.cbs?.onError(err === "not-allowed" ? "Microphone permission denied" : `Recognition error: ${err}`);
     };
-    rec.onend = () => {
-      // session ended without any final: flip once if we can, else finish clean
-      if (!this.gotFinal && this.switches < 2 && this.switches === 0) {
-        this.trySwitch(this.lastLang === "zh-TW" ? "en-US" : "zh-TW");
-        return;
-      }
-      if (!this.gotFinal) this.cbs?.onFinal("");
-    };
-    this.lastLang = lang;
+    rec.start();
     this.cbs?.onLang(lang);
   }
 
-  private lastLang: SttLang = "zh-TW";
-
   private trySwitch(lang: SttLang): void {
-    if (this.switches >= 2 || lang === this.lastLang) return;
-    this.switches++;
+    if (this.switched) return;
+    this.switched = true;
+    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
     this.spinUp(lang);
   }
 
   stop(): void {
-    if (this.matureTimer) { clearTimeout(this.matureTimer); this.matureTimer = null; }
+    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
     try {
       this.rec?.stop();
     } catch {
