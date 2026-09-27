@@ -238,6 +238,65 @@ export function AskScreen(): React.JSX.Element {
 
   return (
     <div className="space-y-4 pb-2">
+      {/* unified input bar: textarea full-width, actions on their own row */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+        className="rounded-2xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-2 shadow-sm"
+      >
+        <textarea
+          ref={taRef}
+          value={text}
+          rows={2}
+          onChange={(e) => {
+            setText(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+          }}
+          placeholder="English, rough pinyin, or 中文…"
+          autoCapitalize="none"
+          autoCorrect="off"
+          enterKeyHint="send"
+          className="max-h-40 w-full resize-none rounded-xl bg-transparent px-2 py-2 outline-none"
+        />
+        <div className="mt-1 flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label="Speak"
+            onClick={() => void toggleMic()}
+            className={`flex h-11 w-11 items-center justify-center rounded-full transition ${
+              listening ? "bg-red-500 text-white animate-pulse" : "bg-neutral-100 dark:bg-neutral-800"
+            }`}
+          >
+            <IconMic className="h-5 w-5" />
+          </button>
+          <label
+            aria-label="Attach"
+            className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
+          >
+            <IconCamera className="h-5 w-5" />
+            <input
+              type="file"
+              accept="image/*,.pdf,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                void onFile(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={!text.trim() || busy !== null}
+            aria-label="Send"
+            className="ml-auto flex h-11 w-11 items-center justify-center rounded-full bg-amber-500 text-white shadow disabled:opacity-40 active:scale-95 transition"
+          >
+            <IconSend className="h-5 w-5" />
+          </button>
+        </div>
+      </form>
       {anythingActive && (
         <div className="flex items-center justify-between">
           <span className="text-[11px] uppercase tracking-widest text-neutral-400">result</span>
@@ -350,65 +409,6 @@ export function AskScreen(): React.JSX.Element {
         </div>
       )}
 
-      {/* unified input bar: textarea full-width, actions on their own row */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-        className="sticky bottom-16 z-30 rounded-2xl border border-neutral-300 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900/95 p-2 shadow-lg backdrop-blur"
-      >
-        <textarea
-          ref={taRef}
-          value={text}
-          rows={2}
-          onChange={(e) => {
-            setText(e.target.value);
-            e.target.style.height = "auto";
-            e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-          }}
-          placeholder="English, rough pinyin, or 中文…"
-          autoCapitalize="none"
-          autoCorrect="off"
-          enterKeyHint="send"
-          className="max-h-40 w-full resize-none rounded-xl bg-transparent px-2 py-2 outline-none"
-        />
-        <div className="mt-1 flex items-center gap-1.5">
-          <button
-            type="button"
-            aria-label="Speak"
-            onClick={() => void toggleMic()}
-            className={`flex h-11 w-11 items-center justify-center rounded-full transition ${
-              listening ? "bg-red-500 text-white animate-pulse" : "bg-neutral-100 dark:bg-neutral-800"
-            }`}
-          >
-            <IconMic className="h-5 w-5" />
-          </button>
-          <label
-            aria-label="Attach"
-            className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
-          >
-            <IconCamera className="h-5 w-5" />
-            <input
-              type="file"
-              accept="image/*,.pdf,application/pdf"
-              className="hidden"
-              onChange={(e) => {
-                void onFile(e.target.files?.[0] ?? null);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={!text.trim() || busy !== null}
-            aria-label="Send"
-            className="ml-auto flex h-11 w-11 items-center justify-center rounded-full bg-amber-500 text-white shadow disabled:opacity-40 active:scale-95 transition"
-          >
-            <IconSend className="h-5 w-5" />
-          </button>
-        </div>
-      </form>
     </div>
   );
 }
