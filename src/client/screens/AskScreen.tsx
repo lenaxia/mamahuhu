@@ -4,9 +4,8 @@ import { api, ApiError } from "../api";
 import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
-import { Sheet } from "../components/Sheet";
 import { OcrView } from "../components/OcrView";
-import { IconCamera, IconMic, IconSend, IconClose, IconKeyboard } from "../components/Icons";
+import { IconCamera, IconMic, IconSend, IconClose } from "../components/Icons";
 import { useMe } from "../state";
 import { BrowserRecognizer, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
 
@@ -54,7 +53,6 @@ export function AskScreen(): React.JSX.Element {
   const [spokenText, setSpokenText] = useState<string | null>(null);
   const [spokenConfidence, setSpokenConfidence] = useState<number | null>(null);
   const [sttResult, setSttResult] = useState<import("../../shared/api").SttRes | null>(null);
-  const [attachOpen, setAttachOpen] = useState(false);
   const recognizer = useRef<BrowserRecognizer | null>(null);
   const micRec = useRef<MicRecorder | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -352,7 +350,7 @@ export function AskScreen(): React.JSX.Element {
         </div>
       )}
 
-      {/* unified input bar */}
+      {/* unified input bar: textarea full-width, actions on their own row */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -360,83 +358,57 @@ export function AskScreen(): React.JSX.Element {
         }}
         className="sticky bottom-16 z-30 rounded-2xl border border-neutral-300 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900/95 p-2 shadow-lg backdrop-blur"
       >
-        <div className="flex items-end gap-1.5">
-          <textarea
-            ref={taRef}
-            value={text}
-            rows={1}
-            onChange={(e) => {
-              setText(e.target.value);
-              e.target.style.height = "auto";
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-            }}
-            placeholder="English, rough pinyin, or 中文 — “time for a bath”, “gai shui jiao le”"
-            autoCapitalize="none"
-            autoCorrect="off"
-            enterKeyHint="send"
-            className="max-h-40 min-w-0 flex-1 resize-none rounded-xl bg-transparent px-2 py-2.5 outline-none"
-          />
+        <textarea
+          ref={taRef}
+          value={text}
+          rows={2}
+          onChange={(e) => {
+            setText(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+          }}
+          placeholder="English, rough pinyin, or 中文…"
+          autoCapitalize="none"
+          autoCorrect="off"
+          enterKeyHint="send"
+          className="max-h-40 w-full resize-none rounded-xl bg-transparent px-2 py-2 outline-none"
+        />
+        <div className="mt-1 flex items-center gap-1.5">
           <button
             type="button"
             aria-label="Speak"
             onClick={() => void toggleMic()}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${
+            className={`flex h-11 w-11 items-center justify-center rounded-full transition ${
               listening ? "bg-red-500 text-white animate-pulse" : "bg-neutral-100 dark:bg-neutral-800"
             }`}
           >
             <IconMic className="h-5 w-5" />
           </button>
-          <button
-            type="button"
+          <label
             aria-label="Attach"
-            onClick={() => setAttachOpen(true)}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
+            className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
           >
             <IconCamera className="h-5 w-5" />
-          </button>
+            <input
+              type="file"
+              accept="image/*,.pdf,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                void onFile(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
+          </label>
           <button
             type="submit"
             disabled={!text.trim() || busy !== null}
             aria-label="Send"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white shadow disabled:opacity-40 active:scale-95 transition"
+            className="ml-auto flex h-11 w-11 items-center justify-center rounded-full bg-amber-500 text-white shadow disabled:opacity-40 active:scale-95 transition"
           >
             <IconSend className="h-5 w-5" />
           </button>
         </div>
       </form>
-
-      <Sheet open={attachOpen} onClose={() => setAttachOpen(false)} title="Add a photo or file">
-        <div className="space-y-2">
-          {[
-            { kind: "camera", label: "Take photo", hint: "camera" },
-            { kind: "library", label: "Photo library", hint: "pick an image" },
-            { kind: "file", label: "Choose file", hint: "images & PDFs" },
-          ].map((opt) => (
-            <label
-              key={opt.kind}
-              className="flex cursor-pointer items-center justify-between rounded-xl border border-neutral-200 dark:border-neutral-800 px-4 py-3.5 active:scale-[0.99] transition"
-            >
-              <span>
-                <span className="block text-[15px] font-medium">{opt.label}</span>
-                <span className="block text-xs text-neutral-400">{opt.hint}</span>
-              </span>
-              <IconKeyboard className="h-4 w-4 text-neutral-300" />
-              <input
-                type="file"
-                data-kind={opt.kind}
-                accept={opt.kind === "file" ? "image/*,.pdf,application/pdf" : "image/*"}
-                capture={opt.kind === "camera" ? "environment" : undefined}
-                className="hidden"
-                onChange={(e) => {
-                  setAttachOpen(false);
-                  void onFile(e.target.files?.[0] ?? null);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          ))}
-        </div>
-      </Sheet>
     </div>
   );
 }

@@ -85,8 +85,7 @@ test("annotation pref persists and changes rendering", async ({ page }) => {
 
 test("photo mode: upload with mocked OCR, tap word, save", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Attach" }).click();
-  await page.setInputFiles('input[data-kind="library"]', {
+  await page.setInputFiles('input[type=file]', {
     name: "page.png",
     mimeType: "image/png",
     buffer: Buffer.from(
