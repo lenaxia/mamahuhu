@@ -218,7 +218,8 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
         </div>
       )}
 
-      {page.lines.length > 0 && <PhotoPage photoUrl={pageUrl} w={w} h={h} page={page} />}
+      {/* image always displays — with or without detected text */}
+      <PhotoPage photoUrl={pageUrl} w={w} h={h} page={page} />
 
       {tags && tags.length > 0 && (
         <div className="space-y-2">
@@ -251,10 +252,13 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
       )}
 
       {page.lines.length === 0 && !tags?.length && (
-        <div className="rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 p-6 text-center text-sm text-neutral-400">
+        <div className="rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 p-4 text-center text-xs text-neutral-400">
           no readable text on this page
         </div>
       )}
+      {page.lines.length === 0 && tags?.length ? (
+        <p className="text-center text-[11px] text-neutral-400">no readable text — tap a tag, or ✎ circle to refine</p>
+      ) : null}
 
       {markMode && <MarkOverlay photoUrl={pageUrl} onCancel={() => setMarkMode(false)} onCrop={(b) => void refineCrop(b)} />}
     </div>
