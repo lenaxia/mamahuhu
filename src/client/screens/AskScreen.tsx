@@ -61,6 +61,7 @@ export function AskScreen(): React.JSX.Element {
   const [sttLang, setSttLang] = useState<"zh-TW" | "en-US">("zh-TW");
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
+  const [spokenText, setSpokenText] = useState<string | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
   const [sttResult, setSttResult] = useState<SttRes | null>(null);
   const recognizer = useRef<BrowserRecognizer | null>(null);
@@ -79,6 +80,7 @@ export function AskScreen(): React.JSX.Element {
     if (photo) URL.revokeObjectURL(photo.url);
     setPhoto(null);
     setInterim("");
+    setSpokenText(null);
     setSttResult(null);
     setListening(false);
   }
@@ -192,7 +194,7 @@ export function AskScreen(): React.JSX.Element {
         setListening(false);
         setInterim("");
         if (!finalText) return;
-        // route through the normal type pipeline (hanzi or translate)
+        setSpokenText(finalText);
         setText(finalText);
         void submitSpoken(finalText);
       },
@@ -258,7 +260,6 @@ export function AskScreen(): React.JSX.Element {
             </p>
             {interim && <p className="hanzi text-lg">{interim}</p>}
           </div>
-          {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
           {sttResult && (
             <div className="space-y-3">
               <div className="text-xs uppercase tracking-wide text-neutral-400">heard: “{sttResult.text}”</div>
@@ -287,7 +288,6 @@ export function AskScreen(): React.JSX.Element {
             />
           </label>
           {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
-          {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
           {ocrResult && photo && (
             <PhotoPage photoUrl={photo.url} w={photo.w} h={photo.h} ocrResult={ocrResult} />
           )}
@@ -331,7 +331,13 @@ export function AskScreen(): React.JSX.Element {
           </button>
         </div>
       </form>
+        </>
+      )}
 
+      {/* results render for every mode (speak routes here too) */}
+      {spokenText && mode === "speak" && (
+        <p className="text-xs uppercase tracking-wide text-neutral-400">heard: “{spokenText}”</p>
+      )}
       {busy === "lookup" && <div className="animate-pulse text-sm text-neutral-400">Looking up…</div>}
       {busy === "translate" && <div className="animate-pulse text-sm text-neutral-400">Translating…</div>}
       {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
@@ -386,8 +392,6 @@ export function AskScreen(): React.JSX.Element {
           </div>
           {selectedCand && <CandidateCard word={selectedCand} />}
         </div>
-      )}
-        </>
       )}
     </div>
   );
