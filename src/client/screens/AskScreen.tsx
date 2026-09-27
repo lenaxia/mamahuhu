@@ -7,7 +7,7 @@ import { Segmented } from "../components/Segmented";
 import { OcrView } from "../components/OcrView";
 import { IconCamera, IconMic, IconSend, IconClose } from "../components/Icons";
 import { useMe } from "../state";
-import { BrowserRecognizer, LevelMeter, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
+import { BrowserRecognizer, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
 
 const hasHan = (s: string): boolean => /\p{Script=Han}/u.test(s);
 
@@ -55,39 +55,12 @@ export function AskScreen(): React.JSX.Element {
   const [sttResult, setSttResult] = useState<import("../../shared/api").SttRes | null>(null);
   const recognizer = useRef<BrowserRecognizer | null>(null);
   const micRec = useRef<MicRecorder | null>(null);
-  const meter = useRef<LevelMeter | null>(null);
-  const fakeWave = useRef<number>(0);
-  const fakeRaf = useRef(0);
-  const [levels, setLevels] = useState<number[]>([]);
-
-  /** browser-mode waveform: synthetic amplitude so we never open a second
-   *  getUserMedia (iOS kills the recognizer) — same render path as real bars */
-  function startFakeWave(): void {
-    const t0 = performance.now();
-    const tick = () => {
-      fakeRaf.current = requestAnimationFrame(tick);
-      const t = (performance.now() - t0) / 1000;
-      const bars = Array.from({ length: 24 }, (_, i) =>
-        Math.min(1, Math.max(0.08, 0.35 + 0.3 * Math.sin(t * 7 + i * 0.55) + 0.25 * Math.sin(t * 2.3 + i * 1.7))),
-      );
-      setLevels(bars);
-    };
-    fakeRaf.current = requestAnimationFrame(tick);
-  }
-
-  function stopFakeWave(): void {
-    cancelAnimationFrame(fakeRaf.current);
-    setLevels([]);
-  }
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const anythingActive =
     Boolean(translateCard || interps || cands || hanziWords || ocrResult || sttResult || listening || spokenText || ocrBusy);
 
   function reset(): void {
-    meter.current?.stop();
-    meter.current = null;
-    setLevels([]);
     setError(null);
     setTranslateCard(null);
     setInterps(null);
@@ -208,9 +181,6 @@ export function AskScreen(): React.JSX.Element {
     setError(null);
     if (listening) {
       setListening(false);
-      meter.current?.stop();
-      meter.current = null;
-      stopFakeWave();
       if (micRec.current?.active) {
         try {
           const blob = await micRec.current.stop();
@@ -232,18 +202,11 @@ export function AskScreen(): React.JSX.Element {
       return;
     }
     reset();
-    stopFakeWave();
     if (sttServerMode()) {
       const rec = new MicRecorder();
       micRec.current = rec;
       const ok = await rec.start((m) => setError(m));
       if (!ok) return;
-      const stream = rec.getStream();
-      if (stream) {
-        const lm = new LevelMeter();
-        meter.current = lm;
-        lm.attach(stream, setLevels);
-      }
       setListening(true);
       return;
     }
@@ -251,7 +214,6 @@ export function AskScreen(): React.JSX.Element {
       setError("Speech recognition is not supported in this browser");
       return;
     }
-    startFakeWave();
     const r = new BrowserRecognizer();
     recognizer.current = r;
     setListening(true);
@@ -261,9 +223,6 @@ export function AskScreen(): React.JSX.Element {
       (finalText, confidence) => {
         setListening(false);
         setInterim("");
-        meter.current?.stop();
-        meter.current = null;
-        stopFakeWave();
         setSpokenConfidence(confidence ?? null);
         if (!finalText) return;
         setSpokenText(finalText);
@@ -273,9 +232,6 @@ export function AskScreen(): React.JSX.Element {
       (m) => {
         setListening(false);
         setError(m);
-        meter.current?.stop();
-        meter.current = null;
-        stopFakeWave();
       },
       (lang) => void lang,
     );
@@ -302,23 +258,12 @@ export function AskScreen(): React.JSX.Element {
             e.target.style.height = "auto";
             e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
           }}
-          placeholder="English, rough pinyin, or 中文…"
+          placeholder={listening ? "listening… speak now" : "English, rough pinyin, or 中文…"}
           autoCapitalize="none"
           autoCorrect="off"
           enterKeyHint="send"
             className="max-h-40 w-full resize-none rounded-xl bg-transparent px-2 py-2 outline-none"
           />
-          {listening && (
-            <div className="pointer-events-none absolute inset-x-3 bottom-1 flex h-4 items-center justify-center gap-[2px]">
-              {Array.from({ length: 24 }).map((_, i) => (
-                <span
-                  key={i}
-                  className="w-[3px] rounded-full bg-red-500"
-                  style={{ height: `${Math.max(8, (levels[i] ?? 0) * 100)}%`, transition: "height 60ms" }}
-                />
-              ))}
-            </div>
-          )}
         </div>
         <div className="mt-1 flex items-center gap-1.5">
           <button
