@@ -535,11 +535,24 @@ async function buildPhrase(
           words.push({ ...hit, known: true, saved: savedSet.has(seg), box, dir });
           continue;
         }
-        for (const ch of [...seg]) {
+        // char decomposition: split the segment box across its chars so no
+        // word loses its position (was: box dropped → chip invisible)
+        const chs = [...seg];
+        chs.forEach((ch, ci) => {
+          let chBox: [number, number, number, number] | undefined;
+          if (box) {
+            const cw = (box[2] - box[0]) / chs.length;
+            chBox = [
+              Math.round(box[0] + cw * ci),
+              box[1],
+              Math.round(box[0] + cw * (ci + 1)),
+              box[3],
+            ];
+          }
           const charHit = lookup(ch);
-          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch), dir });
-          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, dir });
-        }
+          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch), box: chBox, dir });
+          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, box: chBox, dir });
+        });
       }
       if (words.length) lines.push({ words });
     }
