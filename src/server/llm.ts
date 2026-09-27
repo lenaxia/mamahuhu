@@ -299,54 +299,59 @@ export class GatewayOcrService implements OcrService {
       const bytes = new Uint8Array(await image.arrayBuffer());
       const b64 = Buffer.from(bytes).toString("base64");
       const dims = parseImageDims(bytes);
-      const res = await fetch(`${this.cfg.base}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
-        body: JSON.stringify({
-          model: this.cfg.model,
-          temperature: 0,
-          max_tokens: 3000,
-          messages: [
-            {
-              role: "system",
-              content:
-                `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2]}]}. ${
-                  dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
-                }box uses ABSOLUTE PIXEL coordinates in that image (top-left origin; 0 ≤ x1 < x2 ≤ image width; 0 ≤ y1 < y2 ≤ image height). Never 0-1000 normalized coordinates. Box ONLY the Han characters, not adjacent zhuyin. Omit box if unsure — never invent coordinates.`,
-            },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: "Transcribe the Chinese text with absolute-pixel bounding boxes." },
-                { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
-              ],
-            },
-          ],
-        }),
-      });
-      if (!res.ok) return { ok: false, error: `ocr gateway ${res.status}: ${(await res.text()).slice(0, 200)}` };
-      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      const raw = data.choices?.[0]?.message?.content ?? "";
-      if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
+      const system =
+        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2]}]}. ${
+          dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
+        }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.`;
+      const user = [
+        { type: "text", text: "Transcribe the Chinese text, one item per line, with boxes." },
+        { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
+      ];
 
-      const lines: OcrLine[] = [];
-      const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown }[] } | null;
-      if (parsed?.items?.length) {
-        for (const it of parsed.items) {
-          if (typeof it.text !== "string" || !it.text.trim()) continue;
-          const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
-          const box =
-            b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
-              ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
-              : undefined;
-          lines.push({ text: it.text.trim(), box });
-        }
-        if (lines.length) {
-          const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
-          return { ok: true, value: { lines: healed } };
+      let raw = "";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await fetch(`${this.cfg.base}/chat/completions`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
+          body: JSON.stringify({
+            model: this.cfg.model,
+            temperature: 0,
+            max_tokens: 3000,
+            messages: attempt === 0
+              ? [{ role: "system", content: system }, { role: "user", content: user }]
+              : [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                  { role: "assistant", content: raw.slice(0, 3000) },
+                  { role: "user", content: "That was not the JSON format requested. Return ONLY the JSON object {\"items\":[…]} — no prose, no code fences." },
+                ],
+          }),
+        });
+        if (!res.ok) return { ok: false, error: `ocr gateway ${res.status}: ${(await res.text()).slice(0, 200)}` };
+        const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+        raw = data.choices?.[0]?.message?.content ?? "";
+        if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
+
+        const lines: OcrLine[] = [];
+        const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown }[] } | null;
+        if (parsed?.items?.length) {
+          for (const it of parsed.items) {
+            if (typeof it.text !== "string" || !it.text.trim()) continue;
+            const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
+            const box =
+              b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
+                ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
+                : undefined;
+            lines.push({ text: it.text.trim(), box });
+          }
+          if (lines.length) {
+            const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
+            return { ok: true, value: { lines: healed } };
+          }
         }
       }
-      // fallback: plain-text lines, no boxes
+
+      // final fallback: plain-text lines, no boxes
       const plain = raw
         .split("\n")
         .map((l) => l.trim())

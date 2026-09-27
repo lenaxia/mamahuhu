@@ -12,19 +12,17 @@ type Mode = "type" | "speak" | "photo";
 
 const hasHan = (s: string): boolean => /\p{Script=Han}/u.test(s);
 
-/** Downscale a camera photo client-side before upload (max 1280px, jpeg). Returns sent-image dims. */
+/**
+ * Canonical upload geometry: height EXACTLY 1000px (width by aspect, capped
+ * 1600, never >2.5× upscale). The vision model's Y coordinates use a 1000-grid
+ * internally, so at this size normalized-Y and absolute-Y coincide and the
+ * overlay aligns by construction. Server-side heuristics remain as backstop.
+ */
 async function downscale(file: File): Promise<{ blob: Blob; w: number; h: number }> {
-  try {
-    const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
-    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return { blob: file, w: bmp.width, h: bmp.height };
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bmp.width * scale);
-    canvas.height = Math.round(bmp.height * scale);
-    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.82));
-    return { blob, w: canvas.width, h: canvas.height };
-  } catch {
+  const getBitmap = () => createImageBitmap(file).catch(() => null);
+  let bmp = await getBitmap();
+  if (!bmp) {
+    // bitmap decode failed: fall back to <img> for dimensions, send original
     const dims = await new Promise<{ w: number; h: number }>((resolve) => {
       const img = new Image();
       img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
@@ -33,6 +31,14 @@ async function downscale(file: File): Promise<{ blob: Blob; w: number; h: number
     });
     return { blob: file, ...dims };
   }
+  const scale = Math.min(1000 / bmp.height, 1600 / bmp.width, 2.5);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bmp.width * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.85));
+  bmp.close?.();
+  return { blob, w: canvas.width, h: canvas.height };
 }
 
 export function AskScreen(): React.JSX.Element {

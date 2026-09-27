@@ -27,29 +27,42 @@ export function parseImageDims(buf: Uint8Array): { w: number; h: number } | null
 }
 
 /**
- * Heals the qwen VL coordinate-convention mismatch: some backends emit
- * 0–1000 NORMALIZED boxes instead of absolute pixels. If every coordinate
- * fits inside [0,1000] while the image is larger than 1000px on either axis,
- * treat the boxes as normalized and rescale.
+ * Heals qwen VL coordinate conventions. Empirically (raw-output dumps): the
+ * model emits a 0–1000 NORMALIZED grid for BOTH axes regardless of image
+ * size. Rule: when every coordinate fits a 0-1000 grid, scale x×W/1000 and
+ * y×H/1000. If any coordinate exceeds 1005 (genuine absolute pixels on a
+ * large image), fall back to per-axis heuristics for mixed conventions.
  */
 export function normalizeBoxes(lines: OcrLine[], w: number, h: number): OcrLine[] {
-  const boxes = lines.flatMap((l) => (l.box ? [l.box] : []));
-  if (!boxes.length || (w <= 1005 && h <= 1005)) return lines;
-  const maxCoord = Math.max(...boxes.flat());
-  if (maxCoord > 1005) return lines; // already absolute pixels
-  const sx = w / 1000;
-  const sy = h / 1000;
-  return lines.map((l) =>
-    l.box
-      ? {
-          ...l,
-          box: [
-            Math.min(w - 1, Math.round(l.box[0] * sx)),
-            Math.min(h - 1, Math.round(l.box[1] * sy)),
-            Math.min(w, Math.round(l.box[2] * sx)),
-            Math.min(h, Math.round(l.box[3] * sy)),
-          ] as [number, number, number, number],
-        }
-      : l,
-  );
+  const boxed = lines.filter((l) => l.box);
+  if (!boxed.length || w <= 0 || h <= 0) return lines;
+
+  const maxCoord = Math.max(...boxed.flatMap((l) => l.box!));
+
+  if (maxCoord <= 1005) {
+    // 0-1000 grid on both axes
+    return lines.map((l) => (l.box ? { ...l, box: scaleBox(l.box, w / 1000, h / 1000, w, h) } : l));
+  }
+
+  // mixed/absolute heuristics (backstop for other deployments)
+  const yBeyond = boxed.some((l) => l.box![3] > h * 1.02);
+  const xBeyond = boxed.some((l) => l.box![2] > w * 1.02);
+  const yScale = yBeyond ? h / 1000 : 1;
+  const xScale = xBeyond ? w / 1000 : 1;
+  if (xScale === 1 && yScale === 1) return lines;
+  return lines.map((l) => (l.box ? { ...l, box: scaleBox(l.box, xScale, yScale, w, h) } : l));
+}
+
+function scaleBox(
+  box: [number, number, number, number],
+  sx: number,
+  sy: number,
+  w: number,
+  h: number,
+): [number, number, number, number] {
+  const x1 = Math.min(w - 1, Math.round(box[0] * sx));
+  const y1 = Math.min(h - 1, Math.round(box[1] * sy));
+  const x2 = Math.min(w, Math.round(box[2] * sx));
+  const y2 = Math.min(h, Math.round(box[3] * sy));
+  return [Math.max(0, x1), Math.max(0, y1), Math.max(x1 + 1, x2), Math.max(y1 + 1, y2)];
 }
