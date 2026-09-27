@@ -343,7 +343,8 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     });
 
     const form = new FormData();
-    form.append("image", new Blob([new Uint8Array(1024).fill(1)], { type: "image/png" }), "page.png");
+    const png = await (await import("sharp")).default({ create: { width: 48, height: 24, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "page.png");
     const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
     expect(res.status).toBe(200);
     const body = await res.json();

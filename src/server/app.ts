@@ -101,6 +101,20 @@ async function recordAsk(
 /** Single storage root: mount a Docker volume / PVC here (photos, sqlite, audio cache). */
 export const dataDir = (): string => process.env.DATA_DIR ?? "./data";
 
+/** Normalizes uploads: applies EXIF orientation, re-encodes to a decodable
+ *  jpeg. Returns null when the bytes are not a usable image at all. */
+async function normalizeImage(bytes: Uint8Array): Promise<{ data: Uint8Array; w: number; h: number } | null> {
+  const sharp = (await import("sharp")).default;
+  try {
+    const buf = await sharp(Buffer.from(bytes)).rotate().jpeg({ quality: 88 }).toBuffer();
+    const meta = await sharp(buf).metadata();
+    if (!meta.width || !meta.height) return null;
+    return { data: new Uint8Array(buf), w: meta.width, h: meta.height };
+  } catch {
+    return null;
+  }
+}
+
 async function storePhoto(bytes: Uint8Array): Promise<{ path: string; mime: string; w: number; h: number }> {
   mkdirSync(`${dataDir()}/photos`, { recursive: true });
   const dims = parseImageDims(bytes);
@@ -396,6 +410,9 @@ async function buildPhrase(
       return c.json({ error: "image required (max 12MB)" }, 400);
     }
     const bytes = new Uint8Array(await image.arrayBuffer());
+    const normalized = await normalizeImage(bytes);
+    if (!normalized) return c.json({ error: "couldn't read that image — try retaking or picking a different file" }, 400);
+    const nBytes = normalized.data;
     const savedRows = await sql.all<{ traditional: string }>(
       "SELECT traditional FROM entries WHERE user_id = ?", [user.id],
     );
@@ -467,9 +484,9 @@ async function buildPhrase(
         return c.json({ error: `pdf failed: ${String(e).slice(0, 200)}` }, 502);
       }
     }
-    const res = await deps.ocr.extract(new File([bytes], image.name || "page.jpg", { type: image.type || "image/jpeg" }));
+    const res = await deps.ocr.extract(new File([new Uint8Array(nBytes)], image.name || "page.jpg", { type: "image/jpeg" }));
     if (!res.ok) return c.json({ error: res.error }, 502);
-    const stored = await storePhoto(new Uint8Array(bytes));
+    const stored = await storePhoto(new Uint8Array(nBytes));
 
 
     const lines: { words: z.infer<typeof OcrWordSchema>[] }[] = [];
@@ -528,7 +545,7 @@ async function buildPhrase(
     }
     if (lines.length === 0) {
       // textless photo → tag every subject; client offers circle-to-refine
-      const tags = await identifyTags(bytes);
+      const tags = await identifyTags(nBytes);
       const payload = OcrResSchema.parse({
         lines: [], fullText: "", positioned: false,
         tags: tags.length ? tags : [{ traditional: "？", simplified: "?", pinyin: "?", bpmf: "", gloss: "could not identify" }],
@@ -538,7 +555,7 @@ async function buildPhrase(
       return c.json(payload);
     }
     // text photo: overlay + ALSO tag visible subjects (sign + plant case)
-    const objTags = await identifyTags(bytes);
+    const objTags = await identifyTags(nBytes);
     const payload = OcrResSchema.parse({
       lines, fullText: lineTexts.join("\n"), positioned,
       tags: objTags.length ? objTags : undefined,
@@ -565,9 +582,11 @@ async function buildPhrase(
       return c.json({ error: "image required (max 12MB)" }, 400);
     }
     const bytes = new Uint8Array(await image.arrayBuffer());
-    const tags = await identifyTags(new Uint8Array(await image.arrayBuffer()));
+    const normalized = await normalizeImage(bytes);
+    if (!normalized) return c.json({ error: "couldn't read that image — try retaking" }, 400);
+    const tags = await identifyTags(normalized.data);
     if (!tags.length) return c.json({ error: "could not identify subject" }, 502);
-    const stored = await storePhoto(new Uint8Array(await image.arrayBuffer()));
+    const stored = await storePhoto(normalized.data);
     const payload = { tags, identify: tags[0] };
     await recordAsk(sql, user.id, "ocr", tags[0]!.gloss, payload, stored);
     return c.json(payload);
