@@ -82,3 +82,19 @@ test("annotation pref persists and changes rendering", async ({ page }) => {
   await expect(page.getByText("shuì", { exact: false })).toHaveCount(0);
   await expect(page.getByText("ㄕㄨㄟˋ", { exact: false }).first()).toBeVisible();
 });
+
+test("photo mode: upload with mocked OCR, tap word, save", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "Photo" }).click();
+  await page.setInputFiles('input[type=file]', {
+    name: "page.png",
+    mimeType: "image/png",
+    buffer: Buffer.alloc(2048, 1),
+  });
+  await expect(page.locator('[data-ocr-word="睡覺"]')).toBeVisible();
+  // dad already saved 睡覺 in an earlier test → badge present
+  await expect(page.locator('[data-ocr-word="小貓"]')).toBeVisible();
+  await page.locator('[data-ocr-word="小貓"]').click();
+  await page.getByRole("button", { name: "Save" }).first().click();
+  await expect(page.getByText("Saved").first()).toBeVisible();
+});

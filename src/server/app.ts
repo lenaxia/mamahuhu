@@ -11,6 +11,8 @@ import {
   HanziWordSchema,
   ListEntriesResSchema,
   MeSchema,
+  OcrResSchema,
+  OcrWordSchema,
   PatchEntryReqSchema,
   PatchMeReqSchema,
   PinyinReqSchema,
@@ -29,10 +31,11 @@ import { loadDictionary, type Dictionary } from "./dict";
 import { identityMiddleware, isProxyAuth } from "./auth";
 import {
   GatewayChatClient,
+  GatewayOcrService,
   GatewayTtsService,
   LlmTranslationService,
+  MockOcrService,
   MockTranslationService,
-  UnavailableOcr,
   UnavailableStt,
   UnavailableTts,
 } from "./llm";
@@ -154,7 +157,8 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
     ? new GatewayTtsService({ base, key, model: ttsModel, voice: process.env.TTS_VOICE ?? "zf_xiaoxiao" })
     : new UnavailableTts();
   const stt: SttService = new UnavailableStt();
-  const ocr: OcrService = new UnavailableOcr();
+  const visionModel = process.env.MODEL_VISION ?? "default";
+  const ocr: OcrService = mock ? new MockOcrService() : new GatewayOcrService({ base, key, model: visionModel });
 
   const deps: AppDeps = { sql, dictionary, translations, tts, stt, ocr, sources: new Set() };
 
@@ -245,6 +249,48 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       }
     }
     return c.json(HanziResSchema.parse({ words }));
+  });
+
+  // ---- ask: photo OCR (vision) → segmented tappable words ----
+  app.post("/api/ask/ocr", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.parseBody().catch(() => null);
+    const image = body && "image" in body ? (body.image as File) : null;
+    if (!image || image.size < 10 || image.size > 12 * 1024 * 1024) {
+      return c.json({ error: "image required (max 12MB)" }, 400);
+    }
+    const res = await deps.ocr.extract(image);
+    if (!res.ok) return c.json({ error: res.error }, 502);
+
+    const savedRows = await sql.all<{ traditional: string }>(
+      "SELECT traditional FROM entries WHERE user_id = ?", [user.id],
+    );
+    const savedSet = new Set(savedRows.map((r) => r.traditional));
+
+    const lookup = (seg: string) => {
+      const hit = dictionary.byTrad.get(seg)?.[0];
+      return hit && hit.traditional === seg ? renderWord(hit) : null;
+    };
+    const lines: { words: z.infer<typeof OcrWordSchema>[] }[] = [];
+    const lineTexts: string[] = [];
+    for (const line of res.value.lines) {
+      lineTexts.push(line.text);
+      const words: z.infer<typeof OcrWordSchema>[] = [];
+      for (const seg of segmentHanzi(line.text)) {
+        const direct = lookup(seg);
+        if (direct) {
+          words.push({ ...direct, known: true, saved: savedSet.has(seg) });
+          continue;
+        }
+        for (const ch of [...seg]) {
+          const charHit = lookup(ch);
+          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch) });
+          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false });
+        }
+      }
+      if (words.length) lines.push({ words });
+    }
+    return c.json(OcrResSchema.parse({ lines, fullText: lineTexts.join("\n") }));
   });
 
   // ---- entries ----

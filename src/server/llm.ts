@@ -290,6 +290,58 @@ export class UnavailableStt implements SttService {
   }
 }
 
+export class GatewayOcrService implements OcrService {
+  constructor(private cfg: { base: string; key: string; model: string }) {}
+  available(): boolean { return true; }
+  async extract(image: Blob): Promise<Result<{ lines: { text: string }[] }>> {
+    try {
+      const b64 = Buffer.from(await image.arrayBuffer()).toString("base64");
+      const res = await fetch(`${this.cfg.base}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
+        body: JSON.stringify({
+          model: this.cfg.model,
+          temperature: 0,
+          max_tokens: 2000,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe ALL Han character text line by line. Return ONLY the transcribed lines as plain text, one line per line of text. Ignore bopomofo/zhuyin annotation symbols, Latin letters and handwriting unless they are the only content.",
+            },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Transcribe the Chinese text in this image." },
+                { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
+              ],
+            },
+          ],
+        }),
+      });
+      if (!res.ok) return { ok: false, error: `ocr gateway ${res.status}: ${(await res.text()).slice(0, 200)}` };
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const text = data.choices?.[0]?.message?.content ?? "";
+      if (!text.trim()) return { ok: false, error: "ocr returned no text" };
+      const lines = text
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((t) => ({ text: t }));
+      return { ok: true, value: { lines } };
+    } catch (e) {
+      return { ok: false, error: `ocr failed: ${String(e)}` };
+    }
+  }
+}
+
+export class MockOcrService implements OcrService {
+  available(): boolean { return true; }
+  async extract(): Promise<Result<{ lines: { text: string }[] }>> {
+    return { ok: true, value: { lines: [{ text: "小貓在睡覺" }] } };
+  }
+}
+
 export class UnavailableOcr implements OcrService {
   available(): boolean { return false; }
   async extract(): Promise<Result<{ lines: { text: string }[] }>> {

@@ -1,5 +1,8 @@
 # Mamahuhu 馬馬虎虎
 
+MIT licensed. Dictionary data is [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cedict)
+(CC BY-SA 4.0), bundled via the `cedict-json` package.
+
 Mobile-first Mandarin companion for a parent keeping up with a toddler.
 Ask (English / garbled pinyin / hanzi) → see Traditional hanzi with bopomofo
 beside and pinyin below → save → review in a per-user list with a shared

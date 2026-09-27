@@ -4,6 +4,7 @@ import { api } from "../api";
 import { BpmfColumn } from "../components/AnnotatedText";
 import { Segmented } from "../components/Segmented";
 import { Sheet } from "../components/Sheet";
+import { ttsInfo } from "../tts";
 import { useMe } from "../state";
 
 export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }): React.JSX.Element {
@@ -75,6 +76,12 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
             />
             <span className="w-10 text-right text-sm tabular-nums text-neutral-500">{me.ttsSpeed.toFixed(2)}×</span>
           </div>
+          {!ttsInfo().server && !ttsInfo().zhVoice && (
+            <p className="mt-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+              No Chinese voice found on this device — audio may sound wrong. Install a zh-TW voice in
+              your OS speech settings, or set MODEL_TTS on the server.
+            </p>
+          )}
         </div>
 
         <a

@@ -161,6 +161,13 @@ export const HanziWordSchema = RenderedWordSchema.extend({ known: z.boolean() })
 export const HanziResSchema = z.object({ words: z.array(HanziWordSchema) });
 export type HanziRes = z.infer<typeof HanziResSchema>;
 
+export const OcrWordSchema = RenderedWordSchema.extend({ known: z.boolean(), saved: z.boolean() });
+export const OcrResSchema = z.object({
+  lines: z.array(z.object({ words: z.array(OcrWordSchema) })),
+  fullText: z.string(),
+});
+export type OcrRes = z.infer<typeof OcrResSchema>;
+
 // ---- entries ----
 
 export const CreateEntryReqSchema = z.object({

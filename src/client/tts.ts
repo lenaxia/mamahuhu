@@ -56,3 +56,11 @@ export function stopSpeak(): void {
   currentAudio = null;
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
+
+/** For the Settings warning: browser-TTS deployments need a zh voice on the device. */
+export function ttsInfo(): { server: boolean; zhVoice: boolean } {
+  const zhVoice =
+    ("speechSynthesis" in window) &&
+    window.speechSynthesis.getVoices().some((v) => /^zh/i.test(v.lang));
+  return { server: serverTts === true, zhVoice };
+}

@@ -1,5 +1,6 @@
-import type { EntrySource, HanziRes, Interpretation, RenderedWord, TranslateRes } from "../../shared/api";
+import type { HanziRes, Interpretation, OcrRes, OcrWordSchema, RenderedWord, TranslateRes } from "../../shared/api";
 import { useState } from "react";
+import type { z } from "zod";
 import { api, ApiError } from "../api";
 import { CandidateCard, HanziWordCard, InterpretationCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
@@ -10,6 +11,22 @@ import { useMe } from "../state";
 type Mode = "type" | "speak" | "photo";
 
 const hasHan = (s: string): boolean => /\p{Script=Han}/u.test(s);
+
+/** Downscale a camera photo client-side before upload (max 1280px, jpeg). */
+async function downscale(file: File): Promise<Blob> {
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.82));
+  } catch {
+    return file;
+  }
+}
 
 export function AskScreen(): React.JSX.Element {
   const [mode, setMode] = useState<Mode>("type");
@@ -22,6 +39,10 @@ export function AskScreen(): React.JSX.Element {
   const [selectedCand, setSelectedCand] = useState<RenderedWord | null>(null);
   const [hanziWords, setHanziWords] = useState<HanziRes["words"] | null>(null);
   const [forcedTranslate, setForcedTranslate] = useState(false);
+  const [ocrResult, setOcrResult] = useState<OcrRes | null>(null);
+  const [ocrWord, setOcrWord] = useState<z.infer<typeof OcrWordSchema> | null>(null);
+  const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
+  const [ocrBusy, setOcrBusy] = useState(false);
 
   function reset(): void {
     setError(null);
@@ -31,6 +52,22 @@ export function AskScreen(): React.JSX.Element {
     setSelectedCand(null);
     setHanziWords(null);
     setForcedTranslate(false);
+    setOcrResult(null);
+    setOcrWord(null);
+    setSavedNow(new Set());
+  }
+
+  async function onPhoto(file: File | null): Promise<void> {
+    if (!file || ocrBusy) return;
+    reset();
+    setOcrBusy(true);
+    try {
+      setOcrResult(await api.ocr(await downscale(file)));
+    } catch (e) {
+      setError(e instanceof ApiError ? `OCR failed: ${e.message}` : "OCR failed");
+    } finally {
+      setOcrBusy(false);
+    }
   }
 
   const { me } = useMe();
@@ -89,12 +126,67 @@ export function AskScreen(): React.JSX.Element {
         options={[
           { value: "type", label: <span className="flex items-center justify-center gap-1.5"><IconKeyboard className="h-4 w-4" /> Type</span> },
           { value: "speak", label: <span className="flex items-center justify-center gap-1.5"><IconMic className="h-4 w-4" /> Speak</span>, disabled: true },
-          { value: "photo", label: <span className="flex items-center justify-center gap-1.5"><IconCamera className="h-4 w-4" /> Photo</span>, disabled: true },
+          { value: "photo", label: <span className="flex items-center justify-center gap-1.5"><IconCamera className="h-4 w-4" /> Photo</span> },
         ]}
       />
-      <p className="-mt-2 text-center text-[11px] text-neutral-400">Speak &amp; Photo arrive in Phase 2</p>
+      <p className="-mt-2 text-center text-[11px] text-neutral-400">Speak arrives next</p>
 
-      <form
+      {mode === "photo" && (
+        <div className="space-y-4">
+          <label className="flex h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:scale-[0.99] transition">
+            <IconCamera className="h-8 w-8 text-amber-500" />
+            <span className="text-sm font-medium">Snap a page or choose an image</span>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => void onPhoto(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
+          {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
+          {ocrResult && (
+            <div className="space-y-3">
+              <div className="text-xs uppercase tracking-wide text-neutral-400">tap a word</div>
+              {ocrResult.lines.map((line, li) => (
+                <div key={li} className="flex flex-wrap gap-2">
+                  {line.words.map((w, wi) => {
+                    const isSaved = w.saved || savedNow.has(w.traditional);
+                    return (
+                      <button
+                        key={wi}
+                        data-ocr-word={w.traditional}
+                        onClick={() => setOcrWord(ocrWord?.traditional === w.traditional ? null : w)}
+                        className={`hanzi relative rounded-xl border px-3 py-2 text-xl transition ${
+                          ocrWord?.traditional === w.traditional
+                            ? "border-amber-500 bg-amber-50 dark:bg-amber-950/50"
+                            : "border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                        } ${w.known ? "" : "opacity-50"}`}
+                      >
+                        {w.traditional}
+                        {isSaved && (
+                          <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {ocrWord && (
+                <HanziWordCard
+                  word={ocrWord}
+                  onSaved={(t) => setSavedNow((s) => new Set(s).add(t))}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === "type" && (
+        <>
+          <form
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
@@ -175,6 +267,8 @@ export function AskScreen(): React.JSX.Element {
           </div>
           {selectedCand && <CandidateCard word={selectedCand} />}
         </div>
+      )}
+        </>
       )}
     </div>
   );

@@ -9,7 +9,10 @@ import { AnnotatedText } from "./AnnotatedText";
 import { IconCheck, IconPlay } from "./Icons";
 import { useToast } from "./Toast";
 
-function useSaver(source: EntrySource): { saved: boolean; save: (w: RenderedWord, syllables: Syllables, register?: "casual" | "formal") => Promise<void> } {
+function useSaver(
+  source: EntrySource,
+  onSaved?: (traditional: string) => void,
+): { saved: boolean; save: (w: RenderedWord, syllables: Syllables, register?: "casual" | "formal") => Promise<void> } {
   const show = useToast().show;
   const [saved, setSaved] = useState(false);
   async function save(w: RenderedWord, syllables: Syllables, register: "casual" | "formal" = "casual"): Promise<void> {
@@ -26,6 +29,7 @@ function useSaver(source: EntrySource): { saved: boolean; save: (w: RenderedWord
         syllables,
       });
       setSaved(true);
+      onSaved?.(w.traditional);
       show(res.duplicate ? "Already saved" : "Saved");
     } catch {
       show("Save failed");
@@ -119,10 +123,10 @@ export function CandidateCard({ word }: { word: RenderedWord }) {
   );
 }
 
-/** Hanzi-input word card. */
-export function HanziWordCard({ word }: { word: RenderedWord & { known: boolean } }) {
+/** Hanzi-input / OCR word card. */
+export function HanziWordCard({ word, onSaved }: { word: RenderedWord & { known: boolean }; onSaved?: (t: string) => void }) {
   const annotations = useAnnotations();
-  const { saved, save } = useSaver("hanzi");
+  const { saved, save } = useSaver("hanzi", onSaved);
   const syllables: Syllables = [wordChars(word)];
   return (
     <div data-traditional={word.traditional} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">

@@ -328,3 +328,32 @@ describe("audience fine-tune", () => {
     expect(((await cleared.json()) as { audience: string | null }).audience).toBeNull();
   });
 });
+
+describe("photo OCR (mocked vision, real dictionary)", () => {
+  it("POST /api/ask/ocr returns segmented lines with known/saved flags", async () => {
+    // dad saves 睡覺 first so the saved-badge logic is exercised
+    await app.request("/api/entries", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({
+        traditional: "睡覺", simplified: "睡觉", pinyin: "shuì jiào", pinyinFlat: "shuijiao",
+        bpmf: "ㄕㄨㄟˋ ㄐㄧㄠˋ", english: "to sleep", register: "casual", source: "pinyin",
+        syllables: [[{ h: "睡", py: "shuì", bpmf: "ㄕㄨㄟˋ" }, { h: "覺", py: "jiào", bpmf: "ㄐㄧㄠˋ" }]],
+      }),
+    });
+
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(1024).fill(1)], { type: "image/png" }), "page.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.fullText).toContain("小貓在睡覺");
+    const words = body.lines.flatMap((l: { words: { traditional: string; known: boolean; saved: boolean }[] }) => l.words);
+    const shuijiao = words.find((w: { traditional: string }) => w.traditional === "睡覺");
+    const xiaomao = words.find((w: { traditional: string }) => w.traditional === "小貓");
+    expect(shuijiao?.saved).toBe(true);
+    expect(shuijiao?.known).toBe(true);
+    expect(xiaomao?.known).toBe(true);
+    expect(xiaomao?.saved).toBe(false);
+  });
+});

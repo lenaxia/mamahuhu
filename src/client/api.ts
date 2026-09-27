@@ -4,6 +4,7 @@ import type {
   HanziRes,
   ListEntriesRes,
   Me,
+  OcrRes,
   PatchEntryReq,
   PatchMeReq,
   PinyinRes,
@@ -62,6 +63,16 @@ export const api = {
     req<PinyinRes>("/api/ask/pinyin", { method: "POST", body: JSON.stringify({ text }) }),
   hanzi: (text: string) =>
     req<HanziRes>("/api/ask/hanzi", { method: "POST", body: JSON.stringify({ text }) }),
+  ocr: async (image: Blob): Promise<OcrRes> => {
+    const headers = new Headers();
+    const du = devUser();
+    if (du) headers.set("x-dev-user", du);
+    const form = new FormData();
+    form.append("image", image, "page.jpg");
+    const res = await fetch("/api/ask/ocr", { method: "POST", headers, body: form });
+    if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error ?? `${res.status}`);
+    return (await res.json()) as OcrRes;
+  },
 
   entries: (scope: "mine" | "all", q?: string) =>
     req<ListEntriesRes>(`/api/entries?scope=${scope}${q ? `&q=${encodeURIComponent(q)}` : ""}`),
