@@ -314,11 +314,16 @@ export function AskScreen(): React.JSX.Element {
       )}
 
       {listening && (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 py-6">
-          <span className="h-4 w-4 animate-pulse rounded-full bg-red-500" />
-          <p className="text-sm text-red-600 dark:text-red-400">listening… tap the mic to stop</p>
-          {interim && <p className="hanzi text-lg">{interim}</p>}
-        </div>
+        <button
+          onClick={() => void toggleMic()}
+          className="flex w-full flex-col items-center gap-3 rounded-2xl border-2 border-red-400 dark:border-red-800 bg-red-50 dark:bg-red-950/30 py-6 active:scale-[0.99] transition"
+        >
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500 text-white animate-pulse">
+            <IconMic className="h-6 w-6" />
+          </span>
+          <p className="text-sm font-medium text-red-600 dark:text-red-400">listening — tap to stop</p>
+          {interim && <p className="hanzi text-lg text-neutral-800 dark:text-neutral-200">{interim}</p>}
+        </button>
       )}
 
       {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
