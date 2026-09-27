@@ -120,7 +120,11 @@ export function AskScreen(): React.JSX.Element {
     if (!t || busy) return;
     reset();
 
-    if (hasHan(t)) {
+    const han = hasHan(t);
+    const latin = /[A-Za-z]{2,}/.test(t);
+    // mixed scripts go to the translator (LLM handles code-switching + context);
+    // pure hanzi goes to the word pipeline
+    if (han && !latin) {
       setBusy("lookup");
       try {
         setHanziWords(await api.hanzi(t));

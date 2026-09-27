@@ -73,8 +73,10 @@ export class BrowserRecognizer {
       }
       if (interim) {
         if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
-        // Latin words while listening as zh → they're speaking English
-        if (!this.switched && lang === "zh-TW" && /[A-Za-z]{2,}/.test(interim)) {
+        // Latin words while listening as zh → they're speaking English.
+        // BUT mixed interim (latin + CJK) stays on zh: the zh recognizer
+        // embeds English words far better than en handles Chinese.
+        if (!this.switched && lang === "zh-TW" && /[A-Za-z]{2,}/.test(interim) && !/\p{Script=Han}/u.test(interim)) {
           this.trySwitch("en-US");
           return;
         }
