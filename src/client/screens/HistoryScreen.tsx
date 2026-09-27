@@ -5,6 +5,7 @@ import { InterpretationCard, HanziWordCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
 import { PhotoPage } from "../components/PhotoPage";
 import { Sheet } from "../components/Sheet";
+import { FullScreen } from "../components/FullScreen";
 import { IconCamera, IconKeyboard, IconTrash } from "../components/Icons";
 import { useToast } from "../components/Toast";
 
@@ -104,28 +105,43 @@ export function HistoryScreen(): React.JSX.Element {
         ))}
       </div>
 
-      <Sheet open={open !== null} onClose={() => setOpen(null)} title="From history">
-        {open && (
-          <div className="space-y-3">
-            {open.kind === "translate" && <ResultCard card={open.result as TranslateRes} />}
-            {open.kind === "pinyin" &&
-              ((open.result as { interpretations: Interpretation[] }).interpretations ?? []).map((it, i) => (
-                <InterpretationCard key={i} interp={it} rank={i + 1} />
-              ))}
-            {open.kind === "hanzi" &&
-              ((open.result as HanziRes).words ?? []).map((w, i) => <HanziWordCard key={i} word={w} />)}
-            {open.kind === "ocr" && open.photoUrl && (
-              <PhotoPage photoUrl={open.photoUrl} w={open.photoW} h={open.photoH} ocrResult={open.result as OcrRes} />
-            )}
-            <button
-              onClick={() => void removeOne(open.id)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-50 dark:bg-red-950/50 py-2.5 text-sm font-medium text-red-500"
-            >
-              <IconTrash className="h-4 w-4" /> delete this entry
-            </button>
+      {/* photos get the full screen; text stays in the drawer */}
+      {open?.kind === "ocr" && open.photoUrl ? (
+        <FullScreen open onClose={() => setOpen(null)} label="photo">
+          <div className="rounded-xl bg-neutral-900 p-1">
+            <PhotoPage photoUrl={open.photoUrl} w={open.photoW} h={open.photoH} ocrResult={open.result as OcrRes} />
           </div>
-        )}
-      </Sheet>
+          <button
+            onClick={() => void removeOne(open.id)}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-red-950/60 py-2.5 text-sm font-medium text-red-400"
+          >
+            <IconTrash className="h-4 w-4" /> delete this entry
+          </button>
+        </FullScreen>
+      ) : (
+        <Sheet open={open !== null} onClose={() => setOpen(null)} title="From history">
+          {open && (
+            <div className="space-y-3">
+              {open.kind === "translate" && <ResultCard card={open.result as TranslateRes} />}
+              {open.kind === "pinyin" &&
+                ((open.result as { interpretations: Interpretation[] }).interpretations ?? []).map((it, i) => (
+                  <InterpretationCard key={i} interp={it} rank={i + 1} />
+                ))}
+              {open.kind === "hanzi" &&
+                ((open.result as HanziRes).words ?? []).map((wd, i) => <HanziWordCard key={i} word={wd} />)}
+              {open.kind === "ocr" && !open.photoUrl && (
+                <p className="text-sm text-neutral-400">photo no longer stored</p>
+              )}
+              <button
+                onClick={() => void removeOne(open.id)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-50 dark:bg-red-950/50 py-2.5 text-sm font-medium text-red-500"
+              >
+                <IconTrash className="h-4 w-4" /> delete this entry
+              </button>
+            </div>
+          )}
+        </Sheet>
+      )}
     </div>
   );
 }
