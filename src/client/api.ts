@@ -2,6 +2,8 @@ import type {
   CreateEntryReq,
   Entry,
   HanziRes,
+  HistoryDetail,
+  HistoryItem,
   ListEntriesRes,
   Me,
   OcrRes,
@@ -83,4 +85,9 @@ export const api = {
   deleteEntry: (id: string) => req<void>(`/api/entries/${id}`, { method: "DELETE" }),
 
   ttsStatus: () => req<{ available: boolean }>("/api/tts/status"),
+
+  history: () => req<HistoryItem[]>("/api/history"),
+  historyDetail: (id: string) => req<HistoryDetail>(`/api/history/${id}`),
+  deleteHistory: (id: string) => req<void>(`/api/history/${id}`, { method: "DELETE" }),
+  clearHistory: () => req<void>("/api/history", { method: "DELETE" }),
 };

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from "vitest";
-import { rmSync, mkdirSync } from "node:fs";
+import { rmSync, mkdirSync, readdirSync } from "node:fs";
 import { makeApp, type AppDeps } from "../../src/server/app";
 
 /**
@@ -360,5 +360,71 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     expect(body.positioned).toBe(true);
     expect(shuijiao?.box?.[0]).toBeCloseTo(344, 0);
     expect(xiaomao?.box?.[0]).toBeCloseTo(20, 0);
+  });
+});
+
+describe("history", () => {
+  it("records translate asks and lists them", async () => {
+    await app.request("/api/ask/translate", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "i love you" }),
+    });
+    const list = await (await app.request("/api/history", { headers: H })).json();
+    expect(list.length).toBeGreaterThan(0);
+    const item = list.find((i: { kind: string; input: string }) => i.kind === "translate" && i.input === "i love you");
+    expect(item).toBeTruthy();
+    expect(item.hasPhoto).toBe(false);
+
+    const detail = await (await app.request(`/api/history/${item.id}`, { headers: H })).json();
+    expect(detail.kind).toBe("translate");
+    expect(detail.result.casual.traditional).toBe("我愛你");
+  });
+
+  it("stores OCR photos (webp when possible) and serves them", async () => {
+    const form = new FormData();
+    const png = await (
+      await import("sharp")
+    ).default({ create: { width: 64, height: 64, channels: 3, background: { r: 250, g: 240, b: 220 } } }).png().toBuffer();
+    form.append("image", new Blob([png], { type: "image/png" }), "page.png");
+    await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    const list = await (await app.request("/api/history", { headers: H })).json();
+    const ocrItem = list.find((i: { kind: string }) => i.kind === "ocr");
+    expect(ocrItem.hasPhoto).toBe(true);
+    const detail = await (await app.request(`/api/history/${ocrItem.id}`, { headers: H })).json();
+    expect(detail.result.lines.length).toBeGreaterThan(0);
+    expect(detail.photoUrl).toContain("/api/photo/");
+    const photo = await app.request(detail.photoUrl, { headers: H });
+    expect(photo.status).toBe(200);
+    expect(photo.headers.get("content-type")).toBe("image/webp");
+  });
+
+  it("only shows your own history", async () => {
+    const momList = await (await app.request("/api/history", { headers: { "x-dev-user": "mom" } })).json();
+    expect(momList.every((i: { kind: string }) => i.kind !== "ocr")).toBe(true);
+  });
+});
+
+describe("DATA_DIR storage root", () => {
+  it("stores photos under DATA_DIR/photos", async () => {
+    process.env.DATA_DIR = "./data-test";
+    try {
+      const tmp = "./data/test-datadir.db";
+      rmSync(tmp, { force: true });
+      rmSync("./data-test", { recursive: true, force: true });
+      const a = (await makeApp({ sqlitePath: tmp })).app;
+      const sharp = (await import("sharp")).default;
+      const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer();
+      const form = new FormData();
+      form.append("image", new Blob([png], { type: "image/png" }), "p.png");
+      const res = await a.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+      expect(res.status).toBe(200);
+      const files = readdirSync("./data-test/photos");
+      expect(files.length).toBe(1);
+      expect(files[0]).toMatch(/\.webp$/);
+      rmSync("./data-test", { recursive: true, force: true });
+    } finally {
+      process.env.DATA_DIR = undefined;
+    }
   });
 });

@@ -11,7 +11,7 @@ controllers:
           pullPolicy: IfNotPresent
         env:
           DB_DRIVER: sqlite
-          SQLITE_PATH: /data/app.db
+          DATA_DIR: /data            # photos + sqlite; mount the PVC here
           # --- forward auth: pick the header your proxy injects ---
           TRUST_PROXY_HEADERS: "1"
           AUTH_HEADER: x-authentik-username   # authelia: remote-user / traefik: x-forwarded-user

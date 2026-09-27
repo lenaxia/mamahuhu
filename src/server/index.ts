@@ -3,7 +3,8 @@ import { mkdirSync } from "node:fs";
 import { makeApp } from "./app";
 
 const port = Number(process.env.PORT ?? 8787);
-mkdirSync("./data", { recursive: true });
+const data = process.env.DATA_DIR ?? "./data";
+mkdirSync(`${data}/photos`, { recursive: true });
 
 const { app } = await makeApp();
 

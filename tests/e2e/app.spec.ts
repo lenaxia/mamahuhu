@@ -107,3 +107,19 @@ test("photo mode: upload with mocked OCR, tap word, save", async ({ page }) => {
   await page.getByRole("button", { name: "Save" }).first().click();
   await expect(page.getByText("Saved").first()).toBeVisible();
 });
+
+test("history records asks, unsaved included", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "hist"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+
+  // an unsaved pinyin lookup
+  await page.getByPlaceholder(/English or rough pinyin/).fill("nihao");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("ㄋㄧˇ").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "History" }).click();
+  await expect(page.getByText("nihao")).toBeVisible();
+  await page.locator('[data-history-item="pinyin"]').first().click();
+  await expect(page.getByText("dictionary match").first()).toBeVisible();
+});

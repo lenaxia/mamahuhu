@@ -3,9 +3,10 @@ import { MeProvider, useMe } from "./state";
 import { initTts } from "./tts";
 import { AskScreen } from "./screens/AskScreen";
 import { WordsScreen } from "./screens/WordsScreen";
+import { HistoryScreen } from "./screens/HistoryScreen";
 import { Onboarding, SettingsSheet } from "./screens/SettingsSheet";
 import { ToastProvider } from "./components/Toast";
-import { IconBook, IconKeyboard } from "./components/Icons";
+import { IconBook, IconClock, IconKeyboard } from "./components/Icons";
 
 export default function App(): React.JSX.Element {
   return (
@@ -17,7 +18,7 @@ export default function App(): React.JSX.Element {
   );
 }
 
-type Tab = "ask" | "words";
+type Tab = "ask" | "words" | "history";
 
 function Shell(): React.JSX.Element {
   const { me, loading } = useMe();
@@ -59,8 +60,10 @@ function Shell(): React.JSX.Element {
           </div>
         ) : tab === "ask" ? (
           <AskScreen />
-        ) : (
+        ) : tab === "words" ? (
           <WordsScreen />
+        ) : (
+          <HistoryScreen />
         )}
       </main>
 
@@ -68,6 +71,7 @@ function Shell(): React.JSX.Element {
         <div className="mx-auto flex max-w-lg pb-[env(safe-area-inset-bottom)]">
           <TabButton active={tab === "ask"} onClick={() => setTab("ask")} icon={<IconKeyboard className="h-5 w-5" />} label="Ask" />
           <TabButton active={tab === "words"} onClick={() => setTab("words")} icon={<IconBook className="h-5 w-5" />} label="Words" />
+          <TabButton active={tab === "history"} onClick={() => setTab("history")} icon={<IconClock className="h-5 w-5" />} label="History" />
         </div>
       </nav>
 

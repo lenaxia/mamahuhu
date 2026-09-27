@@ -28,8 +28,9 @@ dev-only user switcher.
 
 ## Data
 
-SQLite by default (`SQLITE_PATH`), Postgres via `DB_DRIVER=postgres` +
-`DATABASE_URL` — identical schemas. Migrate between them:
+SQLite by default, Postgres via `DB_DRIVER=postgres` + `DATABASE_URL` — identical
+schemas. All local state (SQLite, OCR photos as webp) lives under **`DATA_DIR`**
+(default `./data`) — mount a Docker volume or PVC at `/data` to persist it. Migrate between them:
 
 ```bash
 npm run export:db -- old.json   # from the old DB

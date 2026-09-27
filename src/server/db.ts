@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS audio_files (
   mime TEXT NOT NULL DEFAULT 'audio/mpeg',
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS asks (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  input TEXT NOT NULL DEFAULT '',
+  result TEXT NOT NULL DEFAULT '{}',
+  photo_path TEXT,
+  photo_mime TEXT,
+  photo_w INTEGER NOT NULL DEFAULT 0,
+  photo_h INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_asks_user ON asks(user_id, created_at);
 CREATE TABLE IF NOT EXISTS dict_words (
   traditional TEXT NOT NULL,
   simplified TEXT NOT NULL,

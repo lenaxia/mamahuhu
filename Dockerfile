@@ -15,7 +15,7 @@ RUN npm ci --omit=dev
 # ---- runtime ----
 FROM node:22-bookworm-slim
 WORKDIR /app
-ENV NODE_ENV=production PORT=8787 SQLITE_PATH=/data/app.db
+ENV NODE_ENV=production PORT=8787 DATA_DIR=/data
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { serveStatic } from "@hono/node-server/serve-static";
 import {
   AnnotationsSchema,
@@ -13,6 +14,9 @@ import {
   MeSchema,
   OcrResSchema,
   OcrWordSchema,
+  AskKindSchema,
+  HistoryDetailSchema,
+  HistoryItemSchema,
   PatchEntryReqSchema,
   PatchMeReqSchema,
   PinyinReqSchema,
@@ -41,6 +45,8 @@ import {
 } from "./llm";
 import { candidates, interpret, normalizePinyinInput, renderWord, segmentHanzi } from "../shared/fuzzy";
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
+import { parseImageDims } from "./imageinfo";
+import type { AskKind } from "../shared/api";
 import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService } from "./ports";
 
 export type { AppDeps } from "./ports";
@@ -52,6 +58,53 @@ export interface AppOptions {
 }
 
 const isHan = (ch: string): boolean => /\p{Script=Han}/u.test(ch);
+
+// ---- history ----
+
+interface AskRow {
+  id: string; user_id: string; kind: string; input: string; result: string;
+  photo_path: string | null; photo_mime: string | null; photo_w: number; photo_h: number; created_at: string;
+}
+
+async function recordAsk(
+  sql: Sql,
+  userId: string,
+  kind: AskKind,
+  input: string,
+  result: unknown,
+  photo?: { path: string; mime: string; w: number; h: number },
+): Promise<string> {
+  const id = randomUUID();
+  await sql.run(
+    `INSERT INTO asks (id, user_id, kind, input, result, photo_path, photo_mime, photo_w, photo_h, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [id, userId, kind, input.slice(0, 500), JSON.stringify(result), photo?.path ?? null, photo?.mime ?? null,
+     photo?.w ?? 0, photo?.h ?? 0, new Date().toISOString()],
+  ).catch(() => undefined);
+  return id;
+}
+
+/** Single storage root: mount a Docker volume / PVC here (photos, sqlite, audio cache). */
+export const dataDir = (): string => process.env.DATA_DIR ?? "./data";
+
+async function storePhoto(bytes: Uint8Array): Promise<{ path: string; mime: string; w: number; h: number }> {
+  mkdirSync(`${dataDir()}/photos`, { recursive: true });
+  const dims = parseImageDims(bytes);
+  const id = randomUUID();
+  try {
+    const sharp = (await import("sharp")).default;
+    const buf = await sharp(Buffer.from(bytes)).webp({ quality: 80 }).toBuffer();
+    const meta = await sharp(buf).metadata();
+    const path = `${dataDir()}/photos/${id}.webp`;
+    await writeFile(path, buf);
+    return { path, mime: "image/webp", w: meta.width ?? dims?.w ?? 0, h: meta.height ?? dims?.h ?? 0 };
+  } catch {
+    // not a decodable image (e.g. test fixtures): store as-is
+    const path = `${dataDir()}/photos/${id}.bin`;
+    await writeFile(path, bytes);
+    return { path, mime: "application/octet-stream", w: dims?.w ?? 0, h: dims?.h ?? 0 };
+  }
+}
 
 function meDTO(row: UserRow) {
   return MeSchema.parse({
@@ -133,7 +186,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
   const driver = process.env.DB_DRIVER === "postgres" || opts.postgresUrl ? "postgres" : "sqlite";
   const sql: Sql = await makeSql({
     driver,
-    sqlitePath: opts.sqlitePath ?? process.env.SQLITE_PATH ?? "./data/app.db",
+    sqlitePath: opts.sqlitePath ?? process.env.SQLITE_PATH ?? `${process.env.DATA_DIR ?? "./data"}/app.db`,
     databaseUrl: opts.postgresUrl ?? process.env.DATABASE_URL,
   });
   await ensureSchema(sql);
@@ -199,6 +252,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       interpretations: interpret(norm, dictionary.index),
       candidates: candidates(norm, dictionary.index),
     });
+    await recordAsk(sql, c.get("user").id, "pinyin", parsed.data.text, res);
     return c.json(res);
   });
 
@@ -218,7 +272,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       })
       .filter((a) => a.ok)
       .map(({ casual, formal }) => ({ casual, formal }));
-    return c.json(TranslateResSchema.parse({
+    const payload = TranslateResSchema.parse({
       source: parsed.data.text,
       register: "casual",
       casual: res.value.casual,
@@ -227,7 +281,9 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       formalSyllables: res.value.formal.pinyin !== res.value.casual.pinyin ? formal.syllables : undefined,
       alternatives: alternatives.length ? alternatives : undefined,
       lowConfidence: casual.lowConfidence || formal.lowConfidence || undefined,
-    }));
+    });
+    await recordAsk(sql, c.get("user").id, "translate", parsed.data.text, payload);
+    return c.json(payload);
   });
 
   // ---- ask: hanzi input (local dictionary) ----
@@ -248,7 +304,9 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
         words.push(lookup(ch) ?? { traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false });
       }
     }
-    return c.json(HanziResSchema.parse({ words }));
+    const payload = HanziResSchema.parse({ words });
+    await recordAsk(sql, c.get("user").id, "hanzi", parsed.data.text, payload);
+    return c.json(payload);
   });
 
   // ---- ask: photo OCR (vision) → segmented tappable words ----
@@ -259,8 +317,10 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
     if (!image || image.size < 10 || image.size > 12 * 1024 * 1024) {
       return c.json({ error: "image required (max 12MB)" }, 400);
     }
-    const res = await deps.ocr.extract(image);
+    const bytes = new Uint8Array(await image.arrayBuffer());
+    const res = await deps.ocr.extract(new Blob([bytes], { type: image.type }));
     if (!res.ok) return c.json({ error: res.error }, 502);
+    const stored = await storePhoto(bytes);
 
     const savedRows = await sql.all<{ traditional: string }>(
       "SELECT traditional FROM entries WHERE user_id = ?", [user.id],
@@ -302,7 +362,76 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       }
       if (words.length) lines.push({ words });
     }
-    return c.json(OcrResSchema.parse({ lines, fullText: lineTexts.join("\n"), positioned }));
+    const payload = OcrResSchema.parse({ lines, fullText: lineTexts.join("\n"), positioned });
+    await recordAsk(sql, user.id, "ocr", lineTexts.join(" ").slice(0, 200), payload, stored);
+    return c.json(payload);
+  });
+
+  // ---- history ----
+  app.get("/api/history", async (c) => {
+    const user = c.get("user");
+    const rows = await sql.all<AskRow>(
+      "SELECT * FROM asks WHERE user_id = ? ORDER BY created_at DESC LIMIT 100", [user.id],
+    );
+    return c.json(rows.map((r) =>
+      HistoryItemSchema.parse({
+        id: r.id,
+        kind: AskKindSchema.parse(r.kind),
+        input: r.input,
+        hasPhoto: r.photo_path !== null,
+        createdAt: r.created_at,
+      }),
+    ));
+  });
+
+  app.get("/api/history/:id", async (c) => {
+    const user = c.get("user");
+    const row = await sql.get<AskRow>("SELECT * FROM asks WHERE id = ? AND user_id = ?", [c.req.param("id"), user.id]);
+    if (!row) return c.json({ error: "not found" }, 404);
+    return c.json(HistoryDetailSchema.parse({
+      id: row.id,
+      kind: AskKindSchema.parse(row.kind),
+      input: row.input,
+      createdAt: row.created_at,
+      photoUrl: row.photo_path ? `/api/photo/${row.id}` : null,
+      photoW: row.photo_w,
+      photoH: row.photo_h,
+      result: JSON.parse(row.result),
+    }));
+  });
+
+  app.delete("/api/history", async (c) => {
+    const user = c.get("user");
+    const rows = await sql.all<AskRow>("SELECT * FROM asks WHERE user_id = ?", [user.id]);
+    for (const r of rows) {
+      if (r.photo_path) await unlink(r.photo_path).catch(() => undefined);
+    }
+    await sql.run("DELETE FROM asks WHERE user_id = ?", [user.id]);
+    return c.body(null, 204);
+  });
+
+  app.delete("/api/history/:id", async (c) => {
+    const user = c.get("user");
+    const row = await sql.get<AskRow>("SELECT * FROM asks WHERE id = ? AND user_id = ?", [c.req.param("id"), user.id]);
+    if (!row) return c.json({ error: "not found" }, 404);
+    if (row.photo_path) await unlink(row.photo_path).catch(() => undefined);
+    await sql.run("DELETE FROM asks WHERE id = ?", [row.id]);
+    return c.body(null, 204);
+  });
+
+  app.get("/api/photo/:id", async (c) => {
+    const user = c.get("user");
+    const row = await sql.get<AskRow>("SELECT * FROM asks WHERE id = ? AND user_id = ?", [c.req.param("id"), user.id]);
+    if (!row?.photo_path) return c.json({ error: "not found" }, 404);
+    try {
+      const buf = await readFile(row.photo_path);
+      return c.body(new Uint8Array(buf), 200, {
+        "content-type": row.photo_mime ?? "application/octet-stream",
+        "cache-control": "private, max-age=31536000, immutable",
+      });
+    } catch {
+      return c.json({ error: "photo missing" }, 404);
+    }
   });
 
   // ---- entries ----

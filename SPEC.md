@@ -183,7 +183,8 @@ valid-syllable set ③ simplified script taken from CEDICT entries when present.
 |---|---|---|
 | `PORT` | `8787` | server port |
 | `DB_DRIVER` | `sqlite` | `sqlite` \| `postgres` |
-| `SQLITE_PATH` | `./data/app.db` | mount a PVC at `/data` |
+| `DATA_DIR` | `./data` | storage root for sqlite + photos — mount a volume/PVC here |
+| `SQLITE_PATH` | `${DATA_DIR}/app.db` | |
 | `DATABASE_URL` | — | required when `DB_DRIVER=postgres` |
 | `TRUST_PROXY_HEADERS` | `0` | `1` in production behind forward-auth |
 | `AUTH_HEADER` | `x-remote-user` | username header from proxy |

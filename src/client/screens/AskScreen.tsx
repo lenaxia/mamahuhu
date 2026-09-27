@@ -1,8 +1,8 @@
-import type { HanziRes, Interpretation, OcrRes, OcrWordSchema, RenderedWord, TranslateRes } from "../../shared/api";
+import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
 import { useState } from "react";
-import type { z } from "zod";
 import { api, ApiError } from "../api";
 import { CandidateCard, HanziWordCard, InterpretationCard } from "../components/Cards";
+import { PhotoPage } from "../components/PhotoPage";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
 import { IconCamera, IconClose, IconKeyboard, IconMic, IconSend } from "../components/Icons";
@@ -47,11 +47,9 @@ export function AskScreen(): React.JSX.Element {
   const [hanziWords, setHanziWords] = useState<HanziRes["words"] | null>(null);
   const [forcedTranslate, setForcedTranslate] = useState(false);
   const [ocrResult, setOcrResult] = useState<OcrRes | null>(null);
-  const [ocrWord, setOcrWord] = useState<z.infer<typeof OcrWordSchema> | null>(null);
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
   const [ocrBusy, setOcrBusy] = useState(false);
   const [photo, setPhoto] = useState<{ url: string; w: number; h: number } | null>(null);
-  const [imgScale, setImgScale] = useState(0);
 
   function reset(): void {
     setError(null);
@@ -62,11 +60,9 @@ export function AskScreen(): React.JSX.Element {
     setHanziWords(null);
     setForcedTranslate(false);
     setOcrResult(null);
-    setOcrWord(null);
     setSavedNow(new Set());
     if (photo) URL.revokeObjectURL(photo.url);
     setPhoto(null);
-    setImgScale(0);
   }
 
   async function onPhoto(file: File | null): Promise<void> {
@@ -161,118 +157,14 @@ export function AskScreen(): React.JSX.Element {
           {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
           {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
           {ocrResult && photo && (
-            <div className="space-y-3">
-              <div className="relative overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800 select-none">
-                <img
-                  src={photo.url}
-                  alt="page"
-                  className="block w-full"
-                  onLoad={(e) => setImgScale(e.currentTarget.clientWidth / (photo.w || e.currentTarget.naturalWidth || 1))}
-                />
-                {ocrResult.positioned &&
-                  imgScale > 0 &&
-                  ocrResult.lines.flatMap((line, li) =>
-                    line.words
-                      .filter((w) => w.box)
-                      .map((w, wi) => {
-                        const [x1, y1, x2, y2] = w.box!;
-                        const isSaved = w.saved || savedNow.has(w.traditional);
-                        const boxH = (y2 - y1) * imgScale;
-                        const boxW = (x2 - x1) * imgScale;
-                        const chars = [...w.traditional].length || 1;
-                        // fit the text to the box: height-bound and width-bound
-                        const fontSize = Math.max(10, Math.min(boxH * 0.78, boxW / (chars * 1.2), 40));
-                        return (
-                          <button
-                            key={`${li}-${wi}`}
-                            data-ocr-word={w.traditional}
-                            onClick={() => setOcrWord(ocrWord?.traditional === w.traditional ? null : w)}
-                            style={{
-                              left: x1 * imgScale,
-                              top: y1 * imgScale,
-                              width: boxW,
-                              height: boxH,
-                              fontSize,
-                              lineHeight: 1.1,
-                            }}
-                            className={`hanzi absolute flex items-center justify-center overflow-hidden rounded-md border px-0.5 transition ${
-                              ocrWord?.traditional === w.traditional
-                                ? "border-amber-500 bg-amber-500/40 text-amber-900 dark:text-amber-100"
-                                : "border-white/70 bg-white/70 text-neutral-900 backdrop-blur-[1px] dark:bg-black/50 dark:text-white"
-                            } ${w.known ? "" : "opacity-50"}`}
-                          >
-                            {w.traditional}
-                            {isSaved && (
-                              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                            )}
-                          </button>
-                        );
-                      }),
-                  )}
-
-                {/* definition popover anchored under the selected box */}
-                {ocrResult.positioned &&
-                  imgScale > 0 &&
-                  ocrWord?.box &&
-                  photo &&
-                  (() => {
-                    const containerW = photo.w * imgScale;
-                    const containerH = photo.h * imgScale;
-                    const [x1, y1, , y2] = ocrWord.box;
-                    const panelW = Math.min(containerW - 16, 320);
-                    const panelH = 200;
-                    const left = Math.min(Math.max(8, x1 * imgScale), Math.max(8, containerW - panelW - 8));
-                    let top = y2 * imgScale + 8;
-                    if (top + panelH > containerH - 8) top = Math.max(8, y1 * imgScale - panelH - 8);
-                    return (
-                      <div className="absolute z-20 drop-shadow-xl" style={{ left, top, width: panelW }}>
-                        <div className="relative">
-                          <button
-                            aria-label="Close"
-                            onClick={() => setOcrWord(null)}
-                            className="absolute -right-2 -top-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-white shadow-lg dark:bg-white dark:text-neutral-900"
-                          >
-                            <IconClose className="h-4 w-4" />
-                          </button>
-                          <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} />
-                        </div>
-                      </div>
-                    );
-                  })()}
-              </div>
-
-              {/* fallback chips for words without boxes */}
-              {!ocrResult.positioned && (
-                <div className="flex flex-wrap gap-2">
-                  {ocrResult.lines.flatMap((line, li) =>
-                    line.words.map((w, wi) => {
-                      const isSaved = w.saved || savedNow.has(w.traditional);
-                      return (
-                        <button
-                          key={`${li}-${wi}`}
-                          data-ocr-word={w.traditional}
-                          onClick={() => setOcrWord(ocrWord?.traditional === w.traditional ? null : w)}
-                          className={`hanzi relative rounded-xl border px-3 py-2 text-xl transition ${
-                            ocrWord?.traditional === w.traditional
-                              ? "border-amber-500 bg-amber-50 dark:bg-amber-950/50"
-                              : "border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-                          } ${w.known ? "" : "opacity-50"}`}
-                        >
-                          {w.traditional}
-                          {isSaved && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900" />}
-                        </button>
-                      );
-                    }),
-                  )}
-                </div>
-              )}
-
-              <div className="text-center text-[11px] text-neutral-400">tap a word on the page</div>
-              {ocrWord && !ocrResult.positioned && (
-                <HanziWordCard
-                  word={ocrWord}
-                  onSaved={(t) => setSavedNow((s) => new Set(s).add(t))}
-                />
+            <PhotoPage photoUrl={photo.url} w={photo.w} h={photo.h} ocrResult={ocrResult} />
+          )}
+          {ocrResult && !photo && (
+            <div className="flex flex-wrap gap-2">
+              {ocrResult.lines.flatMap((line, li) =>
+                line.words.map((w, wi) => (
+                  <HanziWordCard key={`${li}-${wi}`} word={w} onSaved={(t) => setSavedNow((s2) => new Set(s2).add(t))} />
+                )),
               )}
             </div>
           )}

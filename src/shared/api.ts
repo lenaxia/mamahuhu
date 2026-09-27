@@ -232,6 +232,32 @@ export type PatchEntryReq = z.infer<typeof PatchEntryReqSchema>;
 export const ListEntriesResSchema = z.array(EntrySchema);
 export type ListEntriesRes = z.infer<typeof ListEntriesResSchema>;
 
+// ---- history (every ask, saved or not) ----
+
+export const AskKindSchema = z.enum(["translate", "pinyin", "hanzi", "ocr"]);
+export type AskKind = z.infer<typeof AskKindSchema>;
+
+export const HistoryItemSchema = z.object({
+  id: z.string(),
+  kind: AskKindSchema,
+  input: z.string(),
+  hasPhoto: z.boolean(),
+  createdAt: z.string(),
+});
+export type HistoryItem = z.infer<typeof HistoryItemSchema>;
+
+export const HistoryDetailSchema = z.object({
+  id: z.string(),
+  kind: AskKindSchema,
+  input: z.string(),
+  createdAt: z.string(),
+  photoUrl: z.string().nullable(),
+  photoW: z.number(),
+  photoH: z.number(),
+  result: z.unknown(),
+});
+export type HistoryDetail = z.infer<typeof HistoryDetailSchema>;
+
 // ---- errors ----
 
 export const ErrorSchema = z.object({ error: z.string() });
