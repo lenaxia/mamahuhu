@@ -6,6 +6,7 @@ import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { AnnotatedText } from "./AnnotatedText";
 import { Segmented } from "./Segmented";
+import { FollowUpBox } from "./Cards";
 import { IconCheck, IconPlay } from "./Icons";
 import { useToast } from "./Toast";
 
@@ -137,6 +138,7 @@ export function ResultCard({ card }: { card: TranslateRes }) {
           {saved ? "Saved" : "Save"}
         </button>
       </div>
+      <FollowUpBox hanzi={variant.traditional} gloss={variant.gloss} />
     </div>
   );
 }

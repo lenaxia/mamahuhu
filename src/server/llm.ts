@@ -1,7 +1,7 @@
 import { LlmTranslateSchema, type CardVariant } from "../shared/api";
 import { marksToNumbered, numberedToBpmf, numberedToMarks } from "../shared/bpmf";
 import { normalizeBoxes, parseImageDims } from "./imageinfo";
-import type { ChatClient, ChatMessage, ChatOptions, Result, TranslationService, TtsService, SttService, OcrService, OcrLine } from "./ports";
+import type { ChatClient, ChatMessage, ChatOptions, Result, TranslationService, TtsService, SttService, OcrService, OcrLine, DescribeService, DescribeTag, TaggingService, FollowUpService } from "./ports";
 
 const isHan = (ch: string): boolean => /\p{Script=Han}/u.test(ch);
 const countHanzi = (s: string): number => [...s].filter(isHan).length;
@@ -476,9 +476,146 @@ export class GatewayOcrService implements OcrService {
   }
 }
 
+export class GatewayDescribeService implements DescribeService {
+  constructor(private cfg: { base: string; key: string; model: string }) {}
+  async identify(image: Blob): Promise<Result<{ tags: DescribeTag[] }>> {
+    try {
+      const b64 = Buffer.from(await image.arrayBuffer()).toString("base64");
+      const res = await fetch(`${this.cfg.base}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
+        body: JSON.stringify({
+          model: this.cfg.model,
+          temperature: 0.2,
+          max_tokens: 400,
+          messages: [
+            {
+              role: "system",
+              content: 'You tag the subjects in a photo for a Mandarin learner. Return ONLY valid JSON: {"tags":[{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"}]}. List EVERY distinct identifiable subject (plant, animal, food, object, vehicle, place type — not specific people/brands), MOST PROMINENT FIRST, max 6. traditional = common Taiwan Mandarin name. pinyin: Hanyu Pinyin with tone marks, one syllable per Han character, space-separated. gloss: the English name. note (optional): under 10 words. Return {"tags":[]} if nothing is identifiable.',
+            },
+            { role: "user", content: [
+              { type: "text", text: "Tag everything in this photo with its Mandarin name." },
+              { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
+            ] },
+          ],
+        }),
+      });
+      if (!res.ok) return { ok: false, error: `identify gateway ${res.status}` };
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const parsed = (extractJson(data.choices?.[0]?.message?.content ?? "") ?? {}) as {
+        tags?: { traditional?: string; simplified?: string; pinyin?: string; gloss?: string; note?: string }[];
+      };
+      const tags = (parsed.tags ?? [])
+        .filter((t) => t.traditional && t.pinyin)
+        .filter((t) => t.pinyin!.trim().split(/\s+/).length === [...t.traditional!].length)
+        .slice(0, 6)
+        .map((t) => ({
+          traditional: t.traditional!,
+          simplified: t.simplified || t.traditional!,
+          pinyin: t.pinyin!,
+          gloss: t.gloss || "",
+          note: t.note,
+        }));
+      if (!tags.length) return { ok: false, error: "identify returned no tags" };
+      return { ok: true, value: { tags } };
+    } catch (e) {
+      return { ok: false, error: `identify failed: ${String(e)}` };
+    }
+  }
+}
+
+export class MockDescribeService implements DescribeService {
+  async identify(): Promise<Result<{ tags: DescribeTag[] }>> {
+    return {
+      ok: true,
+      value: {
+        tags: [
+          { traditional: "盆栽", simplified: "盆栽", pinyin: "pén zāi", gloss: "potted plant", note: "mock fixture" },
+          { traditional: "花盆", simplified: "花盆", pinyin: "huā pén", gloss: "flower pot" },
+        ],
+      },
+    };
+  }
+}
+
+export class LlmTaggingService implements TaggingService {
+  constructor(private chat: ChatClient, private model: string) {}
+  async tagsFor(input: { traditional: string; english: string }): Promise<Result<string[]>> {
+    const res = await this.chat.complete(
+      [
+        { role: "system", content: "Tag this Mandarin vocabulary item with 3-6 short lowercase English TOPIC tags a parent would search by (e.g. airport, travel, food, bedtime, family, body, animals, colors, numbers, greetings, manners, weather, clothes, school, play, emotions, household, outside, vehicles, doctor). Return ONLY a JSON array of strings, no prose. No duplicates. Generic topics beat synonyms (vehicle, not conveyance)." },
+        { role: "user", content: `${input.traditional} — ${input.english}` },
+      ],
+      { model: this.model, temperature: 0, maxTokens: 120 },
+    );
+    if (!res.ok) return res;
+    const parsed = extractJson(res.value);
+    if (!Array.isArray(parsed)) return { ok: false, error: "tagger returned non-array" };
+    const tags = [...new Set(parsed.filter((t): t is string => typeof t === "string" && /^[a-z][a-z -]{1,24}$/.test(t)).map((t) => t.trim()))].slice(0, 6);
+    return tags.length ? { ok: true, value: tags } : { ok: false, error: "no valid tags" };
+  }
+}
+
+export class MockTaggingService implements TaggingService {
+  async tagsFor(input: { traditional: string; english: string }): Promise<Result<string[]>> {
+    const t = `${input.traditional} ${input.english}`.toLowerCase();
+    const tags: string[] = [];
+    if (/飛機|飞机|airplane|plane|airport|航班/.test(t)) tags.push("airport", "travel", "vehicles");
+    if (/睡|sleep|bed/.test(t)) tags.push("bedtime");
+    if (/吃|飯|饭|food|eat/.test(t)) tags.push("food");
+    if (/謝|谢|thank|hello|你好/.test(t)) tags.push("greetings", "manners");
+    return { ok: true, value: tags.length ? tags : ["family"] };
+  }
+}
+
+export class LlmFollowUpService implements FollowUpService {
+  constructor(private cfg: { base: string; key: string; model: string }) {}
+  async ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array }): Promise<Result<{ answer: string }>> {
+    try {
+      const context = input.hanzi ? `The user is asking about: ${input.hanzi}${input.gloss ? ` (${input.gloss})` : ""}.` : "";
+      const textPart = { type: "text", text: `${context}\n${input.question}`.trim() };
+      const content: unknown[] = [textPart];
+      if (input.photoBytes) {
+        content.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${Buffer.from(input.photoBytes).toString("base64")}` } });
+      }
+      const res = await fetch(`${this.cfg.base}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
+        body: JSON.stringify({
+          model: this.cfg.model,
+          temperature: 0.3,
+          max_tokens: 300,
+          messages: [
+            { role: "system", content: "Answer a Mandarin learner's follow-up question about a vocabulary item or photo. Plain text, under 80 words. Include hanzi + pinyin for any Mandarin terms you introduce. If a photo is provided, look at it again before answering." },
+            { role: "user", content },
+          ],
+        }),
+      });
+      if (!res.ok) return { ok: false, error: `followup gateway ${res.status}` };
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const answer = data.choices?.[0]?.message?.content?.trim();
+      return answer ? { ok: true, value: { answer } } : { ok: false, error: "empty answer" };
+    } catch (e) {
+      return { ok: false, error: `followup failed: ${String(e)}` };
+    }
+  }
+}
+
+export class MockFollowUpService implements FollowUpService {
+  async ask(input: { question: string }): Promise<Result<{ answer: string }>> {
+    if (/tree|樹/i.test(input.question)) {
+      return { ok: true, value: { answer: "It looks like a banyan tree — 榕樹 (róng shù), the classic shade tree in Taiwanese parks." } };
+    }
+    return { ok: true, value: { answer: "mock follow-up answer" } };
+  }
+}
+
 export class MockOcrService implements OcrService {
   available(): boolean { return true; }
-  async extract(): Promise<Result<{ lines: OcrLine[] }>> {
+  async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
+    // mock convention: uploads named plant*/blank* are textless (subject photos)
+    const name = (image as File).name ?? "";
+    if (/plant|blank|textless/i.test(name)) return { ok: true, value: { lines: [] } };
     return { ok: true, value: { lines: [{ text: "小貓在睡覺", box: [20, 30, 560, 110] }] } };
   }
 }

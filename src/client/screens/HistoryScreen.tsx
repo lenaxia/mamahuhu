@@ -3,7 +3,7 @@ import type { HistoryDetail, HistoryItem, HanziRes, Interpretation, OcrRes, SttR
 import { api, ApiError } from "../api";
 import { InterpretationCard, HanziWordCard, PhraseCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
-import { PhotoPage } from "../components/PhotoPage";
+import { OcrView } from "../components/OcrView";
 import { Sheet } from "../components/Sheet";
 import { FullScreen } from "../components/FullScreen";
 import { IconCamera, IconKeyboard, IconTrash } from "../components/Icons";
@@ -121,7 +121,7 @@ export function HistoryScreen(): React.JSX.Element {
             </button>
           }
         >
-          <PhotoPage photoUrl={open.photoUrl} w={open.photoW} h={open.photoH} ocrResult={open.result as OcrRes} />
+          <OcrView ocrResult={open.result as OcrRes} photoUrl={open.photoUrl} w={open.photoW} h={open.photoH} />
         </FullScreen>
       ) : (
         <Sheet open={open !== null} onClose={() => setOpen(null)} title="From history">

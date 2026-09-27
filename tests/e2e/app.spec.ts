@@ -16,7 +16,7 @@ test("dad: onboarding with bpmf, pinyin ask, save", async ({ page }) => {
   await page.getByRole("button", { name: "Start asking" }).click();
   await expect(page.getByText("one quick thing")).toBeHidden();
 
-  await page.getByPlaceholder(/English or rough pinyin/).fill("wo bu zhi dao");
+  await page.getByPlaceholder(/rough pinyin/).fill("wo bu zhi dao");
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect(page.getByText("ㄅㄨˋ").first()).toBeVisible();
@@ -37,7 +37,7 @@ test("mom: english translate with register toggle, save", async ({ page }) => {
   await page.getByRole("tab", { name: "Both" }).click();
   await page.getByRole("button", { name: "Start asking" }).click();
 
-  await page.getByPlaceholder(/English or rough pinyin/).fill("time for sleep");
+  await page.getByPlaceholder(/rough pinyin/).fill("time for sleep");
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect(page.locator('[data-traditional^="你要睡覺"]').first()).toBeVisible();
@@ -85,8 +85,8 @@ test("annotation pref persists and changes rendering", async ({ page }) => {
 
 test("photo mode: upload with mocked OCR, tap word, save", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("tab", { name: "Photo" }).click();
-  await page.setInputFiles('input[type=file]', {
+  await page.getByRole("button", { name: "Attach" }).click();
+  await page.setInputFiles('input[data-kind="library"]', {
     name: "page.png",
     mimeType: "image/png",
     buffer: Buffer.from(
@@ -114,7 +114,7 @@ test("history records asks, unsaved included", async ({ page }) => {
   await page.getByRole("button", { name: "Start asking" }).click();
 
   // an unsaved pinyin lookup
-  await page.getByPlaceholder(/English or rough pinyin/).fill("nihao");
+  await page.getByPlaceholder(/rough pinyin/).fill("nihao");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("ㄋㄧˇ").first()).toBeVisible();
 

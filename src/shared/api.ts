@@ -183,6 +183,22 @@ export const OcrWordSchema = RenderedWordSchema.extend({
   /** absolute pixel box on the UPLOADED image (x1,y1,x2,y2); absent in fallback mode */
   box: BoxSchema.optional(),
 });
+export const IdentifySchema = z.object({
+  traditional: z.string(),
+  simplified: z.string(),
+  pinyin: z.string(),
+  bpmf: z.string(),
+  gloss: z.string(),
+  note: z.string().optional(),
+});
+export type Identify = z.infer<typeof IdentifySchema>;
+
+export const OcrPageSchema = z.object({
+  lines: z.array(z.object({ words: z.array(OcrWordSchema) })),
+  fullText: z.string(),
+  positioned: z.boolean(),
+});
+export type OcrPage = z.infer<typeof OcrPageSchema>;
 export const OcrResSchema = z.object({
   /** image dimensions the boxes refer to */
   width: z.number().optional(),
@@ -191,8 +207,26 @@ export const OcrResSchema = z.object({
   fullText: z.string(),
   /** true when boxes are present (overlay mode) */
   positioned: z.boolean(),
+  /** textless photo → ranked Mandarin name tags for everything visible */
+  tags: z.array(IdentifySchema).max(6).optional(),
+  /** first tag, kept for convenience/back-compat */
+  identify: IdentifySchema.optional(),
+  /** multi-page (PDF) input: per-page OCR; `lines` mirrors page 0 */
+  pages: z.array(OcrPageSchema).optional(),
+  pageCount: z.number().optional(),
+  /** history id of this ask — powers photo-context follow-ups */
+  askId: z.string().optional(),
 });
 export type OcrRes = z.infer<typeof OcrResSchema>;
+
+export const FollowUpReqSchema = z.object({
+  question: z.string().trim().min(1).max(300),
+  hanzi: z.string().max(200).optional(),
+  gloss: z.string().max(300).optional(),
+  askId: z.string().optional(),
+});
+export const FollowUpResSchema = z.object({ answer: z.string() });
+export type FollowUpRes = z.infer<typeof FollowUpResSchema>;
 
 /** POST /api/ask/stt — transcript + auto-routed payload */
 export const SttResSchema = z.object({
@@ -237,6 +271,7 @@ export const EntrySchema = z.object({
   exampleZh: z.string().nullable(),
   exampleEn: z.string().nullable(),
   notes: z.string().nullable(),
+  tags: z.array(z.string()).default([]),
   source: EntrySourceSchema,
   syllables: SyllablesSchema,
   createdAt: z.string(),

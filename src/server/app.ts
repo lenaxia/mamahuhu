@@ -24,6 +24,9 @@ import {
   PinyinResSchema,
   RegisterSchema,
   SttResSchema,
+  IdentifySchema,
+  FollowUpReqSchema,
+  FollowUpResSchema,
   TranslateReqSchema,
   TranslateResSchema,
   type Annotations,
@@ -41,8 +44,14 @@ import {
   GatewayOcrService,
   GatewaySttService,
   GatewayTtsService,
+  GatewayDescribeService,
   LlmTranslationService,
   MockOcrService,
+  MockDescribeService,
+  MockTaggingService,
+  LlmTaggingService,
+  MockFollowUpService,
+  LlmFollowUpService,
   MockSttService,
   MockTranslationService,
   UnavailableStt,
@@ -52,7 +61,7 @@ import { candidates, interpret, normalizePinyinInput, renderWord, segmentHanzi }
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
 import { parseImageDims } from "./imageinfo";
 import type { AskKind } from "../shared/api";
-import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService } from "./ports";
+import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService, DescribeService, TaggingService, FollowUpService } from "./ports";
 
 export type { AppDeps } from "./ports";
 
@@ -127,7 +136,7 @@ interface EntryRow {
   id: string; user_id: string; variety: string; traditional: string; simplified: string;
   pinyin: string; pinyin_flat: string; bpmf: string; english: string; register: string;
   example_zh: string | null; example_en: string | null; notes: string | null;
-  source: string; syllables: string; created_at: string; user_name?: string;
+  tags: string; source: string; syllables: string; created_at: string; user_name?: string;
 }
 
 function entryDTO(row: EntryRow): Entry {
@@ -146,6 +155,7 @@ function entryDTO(row: EntryRow): Entry {
     exampleZh: row.example_zh,
     exampleEn: row.example_en,
     notes: row.notes,
+    tags: JSON.parse(row.tags ?? "[]") as string[],
     source: row.source,
     syllables: JSON.parse(row.syllables) as Syllables,
     createdAt: row.created_at,
@@ -224,8 +234,19 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
         : new UnavailableStt();
   const visionModel = process.env.MODEL_VISION ?? "default";
   const ocr: OcrService = mock ? new MockOcrService() : new GatewayOcrService({ base, key, model: visionModel });
+  const describe: DescribeService = mock
+    ? new MockDescribeService()
+    : new GatewayDescribeService({ base, key, model: visionModel });
+  const fastModel = process.env.MODEL_FAST ?? "default";
+  const tagger: TaggingService = mock
+    ? new MockTaggingService()
+    : new LlmTaggingService(new GatewayChatClient({ base, key, defaultModel: fastModel }), fastModel);
 
-  const deps: AppDeps = { sql, dictionary, translations, tts, stt, ocr, sources: new Set() };
+  const followUp: FollowUpService = mock
+    ? new MockFollowUpService()
+    : new LlmFollowUpService({ base, key, model: chatModel });
+
+  const deps: AppDeps = { sql, dictionary, translations, tts, stt, ocr, describe, tagger, followUp, sources: new Set() };
 
 /** whole-utterance card for multi-word hanzi input: per-word pinyin + LLM phrase gloss */
 async function buildPhrase(
@@ -375,19 +396,82 @@ async function buildPhrase(
       return c.json({ error: "image required (max 12MB)" }, 400);
     }
     const bytes = new Uint8Array(await image.arrayBuffer());
-    const res = await deps.ocr.extract(new Blob([bytes], { type: image.type }));
-    if (!res.ok) return c.json({ error: res.error }, 502);
-    const stored = await storePhoto(bytes);
-
     const savedRows = await sql.all<{ traditional: string }>(
       "SELECT traditional FROM entries WHERE user_id = ?", [user.id],
     );
     const savedSet = new Set(savedRows.map((r) => r.traditional));
-
     const lookup = (seg: string) => {
       const hit = pickSense(seg);
       return hit && hit.traditional === seg ? hit : null;
     };
+    if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+      // PDF: render pages to images → same vision-OCR pipeline per page
+      try {
+        const { pdf } = await import("pdf-to-img");
+        const pages: { lines: { words: z.infer<typeof OcrWordSchema>[] }[]; fullText: string; positioned: boolean }[] = [];
+        const storedPages: { path: string; mime: string; w: number; h: number }[] = [];
+        const pageTexts: string[] = [];
+        let count = 0;
+        for await (const pageImage of await pdf(new Uint8Array(bytes), { scale: 2 })) {
+          if (count >= 6) break;
+          const buf = new Uint8Array(pageImage);
+          const extracted = await deps.ocr.extract(new File([buf], `page${count}.png`, { type: "image/png" }));
+          const storedPage = await storePhoto(buf);
+          if (count === 0) {
+            // first page doubles as the ask's stored photo
+            storedPages.push(storedPage);
+          } else {
+            const { randomUUID: ru } = await import("node:crypto");
+            const fsExtra = await import("node:fs/promises");
+            const extraPath = storedPages[0]!.path.replace(/\.(webp|bin)$/, `-p${count + 1}.${{ webp: "webp", bin: "bin" }[storedPages[0]!.path.split(".").pop() as string] ?? "webp"}`);
+            void ru; void fsExtra;
+            // store extra page images beside the first (same base name, -pN suffix)
+            const { readFile: rf, writeFile: wf } = await import("node:fs/promises");
+            await wf(extraPath, await rf(storedPage.path));
+            storedPages.push({ ...storedPage, path: extraPath });
+          }
+          const lineOut: { words: z.infer<typeof OcrWordSchema>[] }[] = [];
+          const texts: string[] = [];
+          let positionedAny = false;
+          if (extracted.ok) {
+            for (const line of extracted.value.lines) {
+              const words: z.infer<typeof OcrWordSchema>[] = [];
+              for (const seg of segmentHanzi(line.text)) {
+                const hit = lookup(seg);
+                if (hit) { words.push({ ...hit, known: true, saved: savedSet.has(seg), box: undefined }); continue; }
+                for (const ch of [...seg]) {
+                  const chHit = lookup(ch);
+                  words.push(chHit ? { ...chHit, known: true, saved: savedSet.has(ch) } : { traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false });
+                }
+              }
+              if (words.length) { lineOut.push({ words }); texts.push(line.text); }
+            }
+          }
+          void positionedAny;
+          pages.push({ lines: lineOut, fullText: texts.join("\n"), positioned: false });
+          pageTexts.push(texts.join(" "));
+          count++;
+        }
+        if (count === 0) return c.json({ error: "pdf rendered no pages" }, 502);
+        const payload = OcrResSchema.parse({
+          lines: pages[0]!.lines, fullText: pageTexts.join("\n\n"), positioned: false,
+          pages, pageCount: count,
+        });
+        await recordAsk(sql, user.id, "ocr", pageTexts.join(" ").slice(0, 200) || `pdf (${count} pages)`, payload, storedPages[0]);
+        // stash per-page paths for the ?page= endpoint via naming convention (-pN suffix)
+        (payload as { __pagePaths?: string[] }).__pagePaths = storedPages.map((sp) => sp.path);
+        await sql.run("UPDATE asks SET result = ? WHERE user_id = ? AND created_at = (SELECT MAX(created_at) FROM asks WHERE user_id = ?)",
+          [JSON.stringify({ ...payload, __pagePaths: storedPages.map((sp) => sp.path) }), user.id, user.id]).catch(() => undefined);
+        return c.json(payload);
+      } catch (e) {
+        return c.json({ error: `pdf failed: ${String(e).slice(0, 200)}` }, 502);
+      }
+    }
+    const res = await deps.ocr.extract(new File([bytes], image.name || "page.jpg", { type: image.type || "image/jpeg" }));
+    if (!res.ok) return c.json({ error: res.error }, 502);
+    const stored = await storePhoto(new Uint8Array(bytes));
+
+
     const lines: { words: z.infer<typeof OcrWordSchema>[] }[] = [];
     const lineTexts: string[] = [];
     let positioned = false;
@@ -419,8 +503,50 @@ async function buildPhrase(
       }
       if (words.length) lines.push({ words });
     }
-    const payload = OcrResSchema.parse({ lines, fullText: lineTexts.join("\n"), positioned });
-    await recordAsk(sql, user.id, "ocr", lineTexts.join(" ").slice(0, 200), payload, stored);
+    if (lines.length === 0) {
+      // textless photo → tag every subject; client offers circle-to-refine
+      const tags = await identifyTags(bytes);
+      const payload = OcrResSchema.parse({
+        lines: [], fullText: "", positioned: false,
+        tags: tags.length ? tags : [{ traditional: "？", simplified: "?", pinyin: "?", bpmf: "", gloss: "could not identify" }],
+        identify: tags[0],
+      });
+      payload.askId = await recordAsk(sql, user.id, "ocr", tags[0]?.gloss ?? "photo", payload, stored);
+      return c.json(payload);
+    }
+    // text photo: overlay + ALSO tag visible subjects (sign + plant case)
+    const objTags = await identifyTags(bytes);
+    const payload = OcrResSchema.parse({
+      lines, fullText: lineTexts.join("\n"), positioned,
+      tags: objTags.length ? objTags : undefined,
+      identify: objTags[0],
+    });
+    payload.askId = await recordAsk(sql, user.id, "ocr", lineTexts.join(" ").slice(0, 200), payload, stored);
+    return c.json(payload);
+  });
+
+  const identifyTags = async (rawBytes: Uint8Array | Buffer): Promise<(z.infer<typeof IdentifySchema> & { bpmf: string })[]> => {
+    const res = await deps.describe.identify(new Blob([new Uint8Array(rawBytes)], { type: "image/jpeg" }));
+    if (!res.ok) return [];
+    return res.value.tags
+      .map((t) => ({ ...t, bpmf: t.pinyin.trim().split(/\s+/).map((sy) => numberedToBpmf(marksToNumbered(sy))).join(" ") }))
+      .filter((t) => t.bpmf.trim().length > 0);
+  };
+
+  // ---- ask: subject identification (circle-refined crops or explicit calls) ----
+  app.post("/api/ask/identify", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.parseBody().catch(() => null);
+    const image = body && "image" in body ? (body.image as File) : null;
+    if (!image || image.size < 10 || image.size > 12 * 1024 * 1024) {
+      return c.json({ error: "image required (max 12MB)" }, 400);
+    }
+    const bytes = new Uint8Array(await image.arrayBuffer());
+    const tags = await identifyTags(new Uint8Array(await image.arrayBuffer()));
+    if (!tags.length) return c.json({ error: "could not identify subject" }, 502);
+    const stored = await storePhoto(new Uint8Array(await image.arrayBuffer()));
+    const payload = { tags, identify: tags[0] };
+    await recordAsk(sql, user.id, "ocr", tags[0]!.gloss, payload, stored);
     return c.json(payload);
   });
 
@@ -485,6 +611,26 @@ async function buildPhrase(
     return c.json(payload);
   });
 
+  // ---- ask: follow-up Q&A on any card ----
+  app.post("/api/ask/followup", async (c) => {
+    const user = c.get("user");
+    const parsed = FollowUpReqSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "bad request" }, 400);
+    const { question, hanzi, gloss, askId } = parsed.data;
+    let photoBytes: Uint8Array | undefined;
+    if (askId) {
+      const row = await sql.get<AskRow>("SELECT * FROM asks WHERE id = ? AND user_id = ?", [askId, user.id]);
+      if (row?.photo_path) {
+        try {
+          photoBytes = new Uint8Array(await readFile(row.photo_path));
+        } catch { /* photo missing — answer without image */ }
+      }
+    }
+    const res = await deps.followUp.ask({ question, hanzi, gloss, photoBytes });
+    if (!res.ok) return c.json({ error: res.error }, 502);
+    return c.json(FollowUpResSchema.parse(res.value));
+  });
+
   // ---- history ----
   app.get("/api/history", async (c) => {
     const user = c.get("user");
@@ -541,8 +687,14 @@ async function buildPhrase(
     const user = c.get("user");
     const row = await sql.get<AskRow>("SELECT * FROM asks WHERE id = ? AND user_id = ?", [c.req.param("id"), user.id]);
     if (!row?.photo_path) return c.json({ error: "not found" }, 404);
+    let path = row.photo_path;
+    const page = Number(c.req.query("page") ?? "1");
+    if (page > 1) {
+      const stored = JSON.parse(row.result) as { __pagePaths?: string[] };
+      path = stored.__pagePaths?.[page - 1] ?? path;
+    }
     try {
-      const buf = await readFile(row.photo_path);
+      const buf = await readFile(path);
       return c.body(new Uint8Array(buf), 200, {
         "content-type": row.photo_mime ?? "application/octet-stream",
         "cache-control": "private, max-age=31536000, immutable",
@@ -565,11 +717,14 @@ async function buildPhrase(
     if (dup) return c.json({ ...entryDTO(dup), duplicate: true });
     const id = randomUUID();
     const flat = e.pinyinFlat || stripToneMarks(e.pinyin).replace(/\s+/g, "");
+    // topical tags via the fast model — indexed for search (never blocks save on failure)
+    const tagged = await deps.tagger.tagsFor({ traditional: e.traditional, english: e.english }).catch(() => null);
+    const tags = tagged?.ok ? tagged.value : [];
     await sql.run(
-      `INSERT INTO entries (id, user_id, variety, traditional, simplified, pinyin, pinyin_flat, bpmf, english, register, example_zh, example_en, notes, source, syllables, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO entries (id, user_id, variety, traditional, simplified, pinyin, pinyin_flat, bpmf, english, register, example_zh, example_en, notes, tags, source, syllables, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, user.id, "zh-Hant", e.traditional, e.simplified, e.pinyin, flat, e.bpmf, e.english, e.register,
-       e.exampleZh ?? null, e.exampleEn ?? null, e.notes ?? null, e.source, JSON.stringify(e.syllables), new Date().toISOString()],
+       e.exampleZh ?? null, e.exampleEn ?? null, e.notes ?? null, JSON.stringify(tags), e.source, JSON.stringify(e.syllables), new Date().toISOString()],
     );
     const row = await sql.get<EntryRow>(
       "SELECT e.*, u.name AS user_name FROM entries e JOIN users u ON u.id = e.user_id WHERE e.id = ?", [id],
@@ -585,9 +740,9 @@ async function buildPhrase(
     const params: unknown[] = [];
     if (scope === "mine") { where.push("e.user_id = ?"); params.push(user.id); }
     if (q) {
-      where.push("(LOWER(e.traditional) LIKE ? OR LOWER(e.simplified) LIKE ? OR e.pinyin_flat LIKE ? OR LOWER(e.english) LIKE ?)");
+      where.push("(LOWER(e.traditional) LIKE ? OR LOWER(e.simplified) LIKE ? OR e.pinyin_flat LIKE ? OR LOWER(e.english) LIKE ? OR LOWER(e.tags) LIKE ?)");
       const like = `%${q}%`;
-      params.push(like, like, like, like);
+      params.push(like, like, like, like, like);
     }
     const rows = await sql.all<EntryRow>(
       `SELECT e.*, u.name AS user_name FROM entries e JOIN users u ON u.id = e.user_id
@@ -651,9 +806,9 @@ async function buildPhrase(
     );
     const esc = (s: string | null) => `"${(s ?? "").replace(/"/g, '""')}"`;
     const csv = [
-      "created_at,tradtional,simplified,pinyin,bopomofo,english,register,source,notes",
+      "created_at,tradtional,simplified,pinyin,bopomofo,english,register,source,tags,notes",
       ...rows.map((r) =>
-        [r.created_at, r.traditional, r.simplified, r.pinyin, r.bpmf, r.english, r.register, r.source, r.notes].map(esc).join(","),
+        [r.created_at, r.traditional, r.simplified, r.pinyin, r.bpmf, r.english, r.register, r.source, JSON.parse(r.tags ?? "[]").join(" "), r.notes].map(esc).join(","),
       ),
     ].join("\n");
     return c.body(csv, 200, {

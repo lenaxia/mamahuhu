@@ -1,30 +1,21 @@
-import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
 import { useRef, useState } from "react";
+import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
 import { api, ApiError } from "../api";
 import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard } from "../components/Cards";
-import { PhotoPage } from "../components/PhotoPage";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
-import { IconCamera, IconClose, IconKeyboard, IconMic, IconSend } from "../components/Icons";
+import { Sheet } from "../components/Sheet";
+import { OcrView } from "../components/OcrView";
+import { IconCamera, IconMic, IconSend, IconClose, IconKeyboard } from "../components/Icons";
 import { useMe } from "../state";
 import { BrowserRecognizer, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
-import type { SttRes } from "../../shared/api";
-
-type Mode = "type" | "speak" | "photo";
 
 const hasHan = (s: string): boolean => /\p{Script=Han}/u.test(s);
 
-/**
- * Canonical upload geometry: height EXACTLY 1000px (width by aspect, capped
- * 1600, never >2.5× upscale). The vision model's Y coordinates use a 1000-grid
- * internally, so at this size normalized-Y and absolute-Y coincide and the
- * overlay aligns by construction. Server-side heuristics remain as backstop.
- */
+/** Canonical upload geometry: height EXACTLY 1000px (width by aspect, capped 1600). */
 async function downscale(file: File): Promise<{ blob: Blob; w: number; h: number }> {
-  const getBitmap = () => createImageBitmap(file).catch(() => null);
-  let bmp = await getBitmap();
+  const bmp = await createImageBitmap(file).catch(() => null);
   if (!bmp) {
-    // bitmap decode failed: fall back to <img> for dimensions, send original
     const dims = await new Promise<{ w: number; h: number }>((resolve) => {
       const img = new Image();
       img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
@@ -44,7 +35,7 @@ async function downscale(file: File): Promise<{ blob: Blob; w: number; h: number
 }
 
 export function AskScreen(): React.JSX.Element {
-  const [mode, setMode] = useState<Mode>("type");
+  const { me } = useMe();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<null | "lookup" | "translate">(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,20 +45,22 @@ export function AskScreen(): React.JSX.Element {
   const [selectedCand, setSelectedCand] = useState<RenderedWord | null>(null);
   const [hanziWords, setHanziWords] = useState<HanziRes | null>(null);
   const [forcedTranslate, setForcedTranslate] = useState(false);
-  const [ocrResult, setOcrResult] = useState<OcrRes | null>(null);
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
-  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrResult, setOcrResult] = useState<OcrRes | null>(null);
   const [photo, setPhoto] = useState<{ url: string; w: number; h: number } | null>(null);
-  const [sttLang, setSttLang] = useState<"auto">("auto"); // detected language display
+  const [ocrBusy, setOcrBusy] = useState(false);
   const [listening, setListening] = useState(false);
-  const [detectedLang, setDetectedLang] = useState<string>("");
   const [interim, setInterim] = useState("");
   const [spokenText, setSpokenText] = useState<string | null>(null);
   const [spokenConfidence, setSpokenConfidence] = useState<number | null>(null);
-  const [sttBusy, setSttBusy] = useState(false);
-  const [sttResult, setSttResult] = useState<SttRes | null>(null);
+  const [sttResult, setSttResult] = useState<import("../../shared/api").SttRes | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
   const recognizer = useRef<BrowserRecognizer | null>(null);
   const micRec = useRef<MicRecorder | null>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  const anythingActive =
+    Boolean(translateCard || interps || cands || hanziWords || ocrResult || sttResult || listening || spokenText || ocrBusy);
 
   function reset(): void {
     setError(null);
@@ -78,31 +71,15 @@ export function AskScreen(): React.JSX.Element {
     setHanziWords(null);
     setForcedTranslate(false);
     setOcrResult(null);
-    setSavedNow(new Set());
     if (photo) URL.revokeObjectURL(photo.url);
     setPhoto(null);
+    setSavedNow(new Set());
     setInterim("");
     setSpokenText(null);
+    setSpokenConfidence(null);
     setSttResult(null);
     setListening(false);
   }
-
-  async function onPhoto(file: File | null): Promise<void> {
-    if (!file || ocrBusy) return;
-    reset();
-    setOcrBusy(true);
-    try {
-      const { blob, w, h } = await downscale(file);
-      setPhoto({ url: URL.createObjectURL(blob), w, h });
-      setOcrResult(await api.ocr(blob));
-    } catch (e) {
-      setError(e instanceof ApiError ? `OCR failed: ${e.message}` : "OCR failed");
-    } finally {
-      setOcrBusy(false);
-    }
-  }
-
-  const { me } = useMe();
 
   async function runTranslate(t: string): Promise<void> {
     setBusy("translate");
@@ -119,11 +96,8 @@ export function AskScreen(): React.JSX.Element {
     const t = text.trim();
     if (!t || busy) return;
     reset();
-
     const han = hasHan(t);
     const latin = /[A-Za-z]{2,}/.test(t);
-    // mixed scripts go to the translator (LLM handles code-switching + context);
-    // pure hanzi goes to the word pipeline
     if (han && !latin) {
       setBusy("lookup");
       try {
@@ -135,7 +109,6 @@ export function AskScreen(): React.JSX.Element {
       }
       return;
     }
-
     setBusy("lookup");
     let pinyinOk = false;
     try {
@@ -153,10 +126,57 @@ export function AskScreen(): React.JSX.Element {
     if (!pinyinOk || forcedTranslate) await runTranslate(t);
   }
 
-  async function handleSttRes(res: SttRes): Promise<void> {
-    setSttResult(res);
-    if (res.route === "text") return;
-    // nothing else: response already carries the routed payload
+  async function submitSpoken(t: string): Promise<void> {
+    setError(null);
+    const han = hasHan(t);
+    const latin = /[A-Za-z]{2,}/.test(t);
+    if (han && !latin) {
+      setBusy("lookup");
+      try {
+        setHanziWords(await api.hanzi(t));
+      } catch {
+        setError("Lookup failed");
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+    await runTranslate(t);
+  }
+
+  async function onFile(file: File | null): Promise<void> {
+    if (!file || ocrBusy) return;
+    reset();
+    setOcrBusy(true);
+    try {
+      const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+      const { blob, w, h } = isPdf ? { blob: file, w: 1000, h: 1414 } : await downscale(file);
+      setPhoto({ url: isPdf ? "pdf" : URL.createObjectURL(blob), w, h });
+      const res = await api.ocr(blob);
+      const url = isPdf ? "pdf" : (photo?.url ?? "");
+      if (isPdf) {
+        // history-viewer supplies real URLs; for fresh asks use objectURL-less pdf placeholder via detail fetch
+        const list = await api.entries("mine", "").catch(() => []);
+        void list;
+        // fetch latest history detail to get the server-side photo URL
+        const hist = await api.history();
+        const item = hist.find((i) => i.kind === "ocr" && i.hasPhoto);
+        if (item) {
+          const detail = await api.historyDetail(item.id);
+          setPhoto({ url: detail.photoUrl ?? "", w: detail.photoW || w, h: detail.photoH || h });
+        } else {
+          setPhoto({ url: "", w, h });
+        }
+      } else {
+        void url;
+        void photo;
+      }
+      setOcrResult(res);
+    } catch (e) {
+      setError(e instanceof ApiError ? `OCR failed: ${e.message}` : "OCR failed");
+    } finally {
+      setOcrBusy(false);
+    }
   }
 
   async function toggleMic(): Promise<void> {
@@ -166,12 +186,17 @@ export function AskScreen(): React.JSX.Element {
       if (micRec.current?.active) {
         try {
           const blob = await micRec.current.stop();
-          setSttBusy(true);
-          await handleSttRes(await api.stt(blob));
+          setOcrBusy(false);
+          setBusy("translate");
+          try {
+            setSttResult(await api.stt(blob));
+          } catch (e) {
+            setError(e instanceof ApiError ? e.message : "Transcription failed");
+          } finally {
+            setBusy(null);
+          }
         } catch (e) {
-          setError(e instanceof ApiError ? e.message : "Transcription failed");
-        } finally {
-          setSttBusy(false);
+          setError(e instanceof Error ? e.message : "Transcription failed");
         }
         return;
       }
@@ -193,7 +218,7 @@ export function AskScreen(): React.JSX.Element {
     const r = new BrowserRecognizer();
     recognizer.current = r;
     setListening(true);
-    setDetectedLang("");
+    setSpokenConfidence(null);
     r.startAuto(
       (t) => setInterim(t),
       (finalText, confidence) => {
@@ -209,158 +234,45 @@ export function AskScreen(): React.JSX.Element {
         setListening(false);
         setError(m);
       },
-      (lang) => setDetectedLang(lang),
+      (lang) => void lang,
     );
   }
 
-  async function submitSpoken(t: string): Promise<void> {
-    setError(null);
-    const han = /\p{Script=Han}/u.test(t);
-    const latin = /[A-Za-z]{2,}/.test(t);
-    // mixed scripts (e.g. "what is 吃飯?") go to the translator — it handles
-    // meta-questions and mixed language; pure hanzi goes to the word pipeline
-    if (han && !latin) {
-      setBusy("lookup");
-      try {
-        setHanziWords(await api.hanzi(t));
-      } catch {
-        setError("Lookup failed");
-      } finally {
-        setBusy(null);
-      }
-      return;
-    }
-    await runTranslate(t);
-  }
-
   return (
-    <div className="space-y-4">
-      <Segmented<Mode>
-        className="w-full [&>button]:flex-1 flex"
-        value={mode}
-        onChange={setMode}
-        options={[
-          { value: "type", label: <span className="flex items-center justify-center gap-1.5"><IconKeyboard className="h-4 w-4" /> Type</span> },
-          { value: "speak", label: <span className="flex items-center justify-center gap-1.5"><IconMic className="h-4 w-4" /> Speak</span> },
-          { value: "photo", label: <span className="flex items-center justify-center gap-1.5"><IconCamera className="h-4 w-4" /> Photo</span> },
-        ]}
-      />
-
-
-      {mode === "speak" && (
-        <div className="space-y-4">
-          <div className="flex flex-col items-center gap-3 py-6">
-            <button
-              aria-label={listening ? "Stop" : "Record"}
-              onClick={() => void toggleMic()}
-              className={`flex h-24 w-24 items-center justify-center rounded-full text-white shadow-lg transition ${
-                listening ? "bg-red-500 scale-105 animate-pulse" : "bg-amber-500 active:scale-95"
-              }`}
-            >
-              <IconMic className="h-10 w-10" />
-            </button>
-            <p className="text-sm text-neutral-400">
-              {sttBusy
-                ? "Transcribing…"
-                : listening
-                  ? `listening${detectedLang ? ` (${detectedLang === "zh-TW" ? "中文" : "English"})` : ""}… tap to stop`
-                  : sttServerMode()
-                    ? "tap to record — any language"
-                    : browserSttSupported()
-                      ? "tap and speak — language is detected automatically"
-                      : "not supported in this browser"}
-            </p>
-            {interim && <p className="hanzi text-lg">{interim}</p>}
-          </div>
-          {sttResult && (
-            <div className="space-y-3">
-              <div className="text-xs uppercase tracking-wide text-neutral-400">heard: “{sttResult.text}”</div>
-              {sttResult.route === "hanzi" && sttResult.hanzi?.phrase && (
-                <PhraseCard phrase={sttResult.hanzi.phrase} words={sttResult.hanzi.words} source="stt" />
-              )}
-              {sttResult.route === "hanzi" &&
-                sttResult.hanzi?.words.map((w, i) => (
-                  <HanziWordCard key={i} word={w} onSaved={(t) => setSavedNow((sv) => new Set(sv).add(t))} />
-                ))}
-              {sttResult.route === "translate" && sttResult.translate && <ResultCard card={sttResult.translate} />}
-              {sttResult.route === "text" && <p className="text-sm text-neutral-400">transcript only — no translation available</p>}
-            </div>
-          )}
-        </div>
-      )}
-
-      {mode === "photo" && (
-        <div className="space-y-4">
-          <label className="flex h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 active:scale-[0.99] transition">
-            <IconCamera className="h-8 w-8 text-amber-500" />
-            <span className="text-sm font-medium">Snap a page or choose an image</span>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={(e) => void onPhoto(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
-          {ocrResult && photo && (
-            <PhotoPage photoUrl={photo.url} w={photo.w} h={photo.h} ocrResult={ocrResult} />
-          )}
-          {ocrResult && !photo && (
-            <div className="flex flex-wrap gap-2">
-              {ocrResult.lines.flatMap((line, li) =>
-                line.words.map((w, wi) => (
-                  <HanziWordCard key={`${li}-${wi}`} word={w} onSaved={(t) => setSavedNow((s2) => new Set(s2).add(t))} />
-                )),
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {mode === "type" && (
-        <>
-          <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <div className="flex gap-2">
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="English or rough pinyin — “time for a bath”, “gai shui jiao le”"
-            autoCapitalize="none"
-            autoCorrect="off"
-            enterKeyHint="send"
-            className="min-w-0 flex-1 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3.5 py-3 outline-none focus:border-amber-500"
-          />
+    <div className="space-y-4 pb-2">
+      {anythingActive && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-widest text-neutral-400">result</span>
           <button
-            type="submit"
-            disabled={!text.trim() || busy !== null}
-            aria-label="Send"
-            className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow disabled:opacity-40 active:scale-95 transition"
+            aria-label="Clear result"
+            onClick={() => {
+              reset();
+              setText("");
+            }}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
           >
-            <IconSend className="h-5 w-5" />
+            <IconClose className="h-4 w-4" />
           </button>
         </div>
-      </form>
-        </>
       )}
 
-      {/* results render for every mode (speak routes here too) */}
-      {spokenText && mode === "speak" && (
-        <div className="text-xs text-neutral-400">
-          <span className="uppercase tracking-wide">heard: “{spokenText}”</span>
-          {spokenConfidence !== null && spokenConfidence < 0.7 && (
-            <span className="ml-2 text-amber-600 dark:text-amber-400">low confidence — maybe retry &amp; enunciate</span>
-          )}
+      {listening && (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 py-6">
+          <span className="h-4 w-4 animate-pulse rounded-full bg-red-500" />
+          <p className="text-sm text-red-600 dark:text-red-400">listening… tap the mic to stop</p>
+          {interim && <p className="hanzi text-lg">{interim}</p>}
         </div>
       )}
+
+      {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
       {busy === "lookup" && <div className="animate-pulse text-sm text-neutral-400">Looking up…</div>}
       {busy === "translate" && <div className="animate-pulse text-sm text-neutral-400">Translating…</div>}
       {error && <div className="rounded-xl bg-red-50 dark:bg-red-950/50 px-3 py-2 text-sm text-red-600 dark:text-red-400">{error}</div>}
+
+      {photo && ocrResult && photo.url && <OcrView ocrResult={ocrResult} photoUrl={photo.url} w={photo.w} h={photo.h} />}
+      {photo && ocrResult && !photo.url && (
+        <div className="rounded-xl bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-500">{ocrResult.pageCount ?? 1} page(s) processed — open from History for the overlay view</div>
+      )}
 
       {translateCard && <ResultCard card={translateCard} />}
 
@@ -371,6 +283,30 @@ export function AskScreen(): React.JSX.Element {
           {hanziWords.words.map((w, i) => (
             <HanziWordCard key={i} word={w} />
           ))}
+        </div>
+      )}
+
+      {sttResult && (
+        <div className="space-y-3">
+          <div className="text-xs uppercase tracking-wide text-neutral-400">heard: “{sttResult.text}”</div>
+          {sttResult.route === "hanzi" && sttResult.hanzi?.phrase && (
+            <PhraseCard phrase={sttResult.hanzi.phrase} words={sttResult.hanzi.words} source="stt" />
+          )}
+          {sttResult.route === "hanzi" &&
+            sttResult.hanzi?.words.map((w, i) => (
+              <HanziWordCard key={i} word={w} onSaved={(t) => setSavedNow((sv) => new Set(sv).add(t))} />
+            ))}
+          {sttResult.route === "translate" && sttResult.translate && <ResultCard card={sttResult.translate} />}
+          {sttResult.route === "text" && <p className="text-sm text-neutral-400">transcript only — no translation available</p>}
+        </div>
+      )}
+
+      {spokenText && (
+        <div className="text-xs text-neutral-400">
+          <span className="uppercase tracking-wide">heard: “{spokenText}”</span>
+          {spokenConfidence !== null && spokenConfidence < 0.7 && (
+            <span className="ml-2 text-amber-600 dark:text-amber-400">low confidence — maybe retry &amp; enunciate</span>
+          )}
         </div>
       )}
 
@@ -415,6 +351,92 @@ export function AskScreen(): React.JSX.Element {
           {selectedCand && <CandidateCard word={selectedCand} />}
         </div>
       )}
+
+      {/* unified input bar */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+        className="sticky bottom-16 z-30 rounded-2xl border border-neutral-300 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900/95 p-2 shadow-lg backdrop-blur"
+      >
+        <div className="flex items-end gap-1.5">
+          <textarea
+            ref={taRef}
+            value={text}
+            rows={1}
+            onChange={(e) => {
+              setText(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+            }}
+            placeholder="English, rough pinyin, or 中文 — “time for a bath”, “gai shui jiao le”"
+            autoCapitalize="none"
+            autoCorrect="off"
+            enterKeyHint="send"
+            className="max-h-40 min-w-0 flex-1 resize-none rounded-xl bg-transparent px-2 py-2.5 outline-none"
+          />
+          <button
+            type="button"
+            aria-label="Speak"
+            onClick={() => void toggleMic()}
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${
+              listening ? "bg-red-500 text-white animate-pulse" : "bg-neutral-100 dark:bg-neutral-800"
+            }`}
+          >
+            <IconMic className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Attach"
+            onClick={() => setAttachOpen(true)}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
+          >
+            <IconCamera className="h-5 w-5" />
+          </button>
+          <button
+            type="submit"
+            disabled={!text.trim() || busy !== null}
+            aria-label="Send"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white shadow disabled:opacity-40 active:scale-95 transition"
+          >
+            <IconSend className="h-5 w-5" />
+          </button>
+        </div>
+      </form>
+
+      <Sheet open={attachOpen} onClose={() => setAttachOpen(false)} title="Add a photo or file">
+        <div className="space-y-2">
+          {[
+            { kind: "camera", label: "Take photo", hint: "camera" },
+            { kind: "library", label: "Photo library", hint: "pick an image" },
+            { kind: "file", label: "Choose file", hint: "images & PDFs" },
+          ].map((opt) => (
+            <label
+              key={opt.kind}
+              className="flex cursor-pointer items-center justify-between rounded-xl border border-neutral-200 dark:border-neutral-800 px-4 py-3.5 active:scale-[0.99] transition"
+            >
+              <span>
+                <span className="block text-[15px] font-medium">{opt.label}</span>
+                <span className="block text-xs text-neutral-400">{opt.hint}</span>
+              </span>
+              <IconKeyboard className="h-4 w-4 text-neutral-300" />
+              <input
+                type="file"
+                data-kind={opt.kind}
+                accept={opt.kind === "file" ? "image/*,.pdf,application/pdf" : "image/*"}
+                capture={opt.kind === "camera" ? "environment" : undefined}
+                className="hidden"
+                onChange={(e) => {
+                  setAttachOpen(false);
+                  void onFile(e.target.files?.[0] ?? null);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      </Sheet>
     </div>
   );
 }

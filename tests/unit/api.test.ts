@@ -386,7 +386,7 @@ describe("history", () => {
     const png = await (
       await import("sharp")
     ).default({ create: { width: 64, height: 64, channels: 3, background: { r: 250, g: 240, b: 220 } } }).png().toBuffer();
-    form.append("image", new Blob([png], { type: "image/png" }), "page.png");
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "page.png");
     await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
     const list = await (await app.request("/api/history", { headers: H })).json();
     const ocrItem = list.find((i: { kind: string }) => i.kind === "ocr");
@@ -416,7 +416,7 @@ describe("DATA_DIR storage root", () => {
       const sharp = (await import("sharp")).default;
       const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer();
       const form = new FormData();
-      form.append("image", new Blob([png], { type: "image/png" }), "p.png");
+      form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "p.png");
       const res = await a.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
       expect(res.status).toBe(200);
       const files = readdirSync("./data-test/photos");
@@ -534,5 +534,88 @@ describe("chinese questions", () => {
     const body = await res.json();
     expect(body.phrase.answer).toBe(false);
     expect(body.phrase.english.length).toBeGreaterThan(0);
+  });
+});
+
+describe("subject identification (textless photos)", () => {
+  it("OCR with no text falls back to an identify card", async () => {
+    const sharp = (await import("sharp")).default;
+    const blank = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 20, g: 120, b: 40 } } }).png().toBuffer(); // a "plant"
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(blank)], { type: "image/png" }), "plant.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.lines.length).toBe(0);
+    expect(body.tags.length).toBe(2);
+    expect(body.tags[0].traditional).toBe("盆栽");
+    expect(body.tags[0].bpmf.length).toBeGreaterThan(0);
+    expect(body.identify.traditional).toBe("盆栽");
+  });
+
+  it("POST /api/ask/identify for circle-refined crops", async () => {
+    const sharp = (await import("sharp")).default;
+    const crop = await sharp({ create: { width: 32, height: 32, channels: 3, background: { r: 20, g: 120, b: 40 } } }).png().toBuffer();
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(crop)], { type: "image/png" }), "crop.png");
+    const res = await app.request("/api/ask/identify", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tags.length).toBe(2);
+    expect(body.tags[0].gloss).toBe("potted plant");
+  });
+});
+
+describe("entry tagging", () => {
+  it("save generates topical tags via the fast model; search matches them", async () => {
+    const post = await app.request("/api/entries", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({
+        traditional: "飛機", simplified: "飞机", pinyin: "fēi jī", pinyinFlat: "feiji",
+        bpmf: "ㄈㄟ ㄐㄧ", english: "airplane", register: "casual", source: "pinyin",
+        syllables: [[{ h: "飛", py: "fēi", bpmf: "ㄈㄟ" }, { h: "機", py: "jī", bpmf: "ㄐㄧ" }]],
+      }),
+    });
+    const saved = await post.json();
+    expect(saved.tags).toContain("airport");
+    expect(saved.tags).toContain("travel");
+    // search by a tag word absent from the english gloss
+    const r = await (await app.request(`/api/entries?scope=mine&q=airport`, { headers: H })).json();
+    expect(r.some((e: { traditional: string }) => e.traditional === "飛機")).toBe(true);
+  });
+});
+
+describe("follow-up Q&A and always-on tags", () => {
+  it("photos WITH text also get object tags", async () => {
+    const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 250, g: 240, b: 220 } } }).png().toBuffer();
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "sign.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    const body = await res.json();
+    expect(body.lines.length).toBeGreaterThan(0);
+    expect(body.tags.length).toBeGreaterThan(0);
+    expect(body.askId).toBeTruthy();
+  });
+
+  it("follow-up answers with card context, vision when askId given", async () => {
+    const textOnly = await app.request("/api/ask/followup", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ question: "what kind of tree is this?", hanzi: "樹", gloss: "tree" }),
+    });
+    const a = await textOnly.json();
+    expect(a.answer.toLowerCase()).toContain("banyan");
+
+    // vision follow-up: reference the ask from the test above
+    const hist = await (await app.request("/api/history", { headers: H })).json();
+    const ocrAsk = hist.find((i: { kind: string; hasPhoto: boolean }) => i.kind === "ocr" && i.hasPhoto);
+    const withPhoto = await app.request("/api/ask/followup", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ question: "what kind of tree?", askId: ocrAsk.id }),
+    });
+    expect((await withPhoto.json()).answer.toLowerCase()).toContain("banyan");
   });
 });

@@ -100,6 +100,20 @@ export const api = {
       return (await res.json()) as SttRes;
     })(),
 
+  identify: async (image: Blob): Promise<{ tags: import("../shared/api").Identify[]; identify?: import("../shared/api").Identify }> => {
+    const headers = new Headers();
+    const du = devUser();
+    if (du) headers.set("x-dev-user", du);
+    const form = new FormData();
+    form.append("image", image, "crop.jpg");
+    const res = await fetch("/api/ask/identify", { method: "POST", headers, body: form });
+    if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error ?? `${res.status}`);
+    return (await res.json()) as { tags: import("../shared/api").Identify[]; identify?: import("../shared/api").Identify };
+  },
+
+  followUp: (body: { question: string; hanzi?: string; gloss?: string; askId?: string }) =>
+    req<{ answer: string }>("/api/ask/followup", { method: "POST", body: JSON.stringify(body) }),
+
   history: () => req<HistoryItem[]>("/api/history"),
   historyDetail: (id: string) => req<HistoryDetail>(`/api/history/${id}`),
   deleteHistory: (id: string) => req<void>(`/api/history/${id}`, { method: "DELETE" }),

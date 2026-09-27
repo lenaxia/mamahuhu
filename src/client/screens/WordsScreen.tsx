@@ -95,6 +95,15 @@ export function WordsScreen(): React.JSX.Element {
           <div className="space-y-4">
             <AnnotatedText syllables={open.syllables.length ? open.syllables : [[{ h: open.traditional, py: open.pinyin, bpmf: open.bpmf }]]} annotations={annotations} />
             <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{open.english || "—"}</p>
+            {open.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {open.tags.map((t) => (
+                  <span key={t} className="rounded-full bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex items-center gap-2 text-xs text-neutral-400">
               <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5">{open.register}</span>
               <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5">{open.source}</span>

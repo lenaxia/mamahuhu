@@ -69,6 +69,18 @@ export interface SttService {
 
 export type OcrLine = { text: string; box?: [number, number, number, number] };
 
+/** Subject identification for textless photos → ranked Mandarin name tags for everything visible. */
+export interface DescribeTag {
+  traditional: string;
+  simplified: string;
+  pinyin: string;
+  gloss: string;
+  note?: string;
+}
+export interface DescribeService {
+  identify(image: Blob): Promise<Result<{ tags: DescribeTag[] }>>;
+}
+
 /** Image OCR. Implementations may return absolute pixel boxes for overlay UI. */
 export interface OcrService {
   available(): boolean;
@@ -81,6 +93,16 @@ export interface DictionaryLookup {
   interpretPinyin(text: string): { interpretations: Interpretation[]; candidates: RenderedWord[] };
 }
 
+/** Topical tags for a saved phrase (cheap fast model; e.g. 飛機 → airport, travel). */
+export interface TaggingService {
+  tagsFor(input: { traditional: string; english: string }): Promise<Result<string[]>>;
+}
+
+/** Conversational follow-up about a result card; photo context when the ask stored an image. */
+export interface FollowUpService {
+  ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array }): Promise<Result<{ answer: string }>>;
+}
+
 export interface AppDeps {
   sql: Sql;
   dictionary: Dictionary;
@@ -88,5 +110,8 @@ export interface AppDeps {
   tts: TtsService;
   stt: SttService;
   ocr: OcrService;
+  describe: DescribeService;
+  tagger: TaggingService;
+  followUp: FollowUpService;
   sources: ReadonlySet<EntrySource>;
 }

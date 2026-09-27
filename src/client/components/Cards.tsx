@@ -123,6 +123,53 @@ export function CandidateCard({ word }: { word: RenderedWord }) {
   );
 }
 
+/** Inline follow-up Q&A about the card above it. */
+export function FollowUpBox({ hanzi, gloss, askId }: { hanzi?: string; gloss?: string; askId?: string }): React.JSX.Element {
+  const [q, setQ] = useState("");
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function ask(): Promise<void> {
+    if (!q.trim() || busy) return;
+    setBusy(true);
+    try {
+      const res = await api.followUp({ question: q.trim(), hanzi, gloss, ...(askId ? { askId } : {}) });
+      setAnswer(res.answer);
+      setQ("");
+    } catch {
+      setAnswer("Couldn't answer that — try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {answer && (
+        <div className="rounded-xl bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300">
+          {answer}
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void ask()}
+          placeholder="ask more…"
+          className="min-w-0 flex-1 rounded-full border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-amber-500"
+        />
+        <button
+          onClick={() => void ask()}
+          disabled={!q.trim() || busy}
+          className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-3 text-xs font-semibold text-neutral-500 disabled:opacity-40"
+        >
+          {busy ? "…" : "ask"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Whole-utterance card for multi-word hanzi (spoken phrases, pasted text). */
 export function PhraseCard({
   phrase,

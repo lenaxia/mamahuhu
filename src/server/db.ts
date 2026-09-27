@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS entries (
   example_zh TEXT,
   example_en TEXT,
   notes TEXT,
+  tags TEXT NOT NULL DEFAULT '[]',
   source TEXT NOT NULL DEFAULT 'manual',
   syllables TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL
@@ -117,7 +118,7 @@ export async function ensureSchema(sql: Sql): Promise<void> {
     await sql.run(stmt);
   }
   // additive migrations for pre-existing databases (both dialects)
-  for (const col of ["ALTER TABLE users ADD COLUMN audience TEXT"]) {
+  for (const col of ["ALTER TABLE users ADD COLUMN audience TEXT", "ALTER TABLE entries ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'"]) {
     await sql.run(col).catch(() => undefined); // column already exists
   }
 }

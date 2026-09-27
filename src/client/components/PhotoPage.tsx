@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { z } from "zod";
-import type { OcrRes, OcrWordSchema } from "../../shared/api";
+import type { OcrPage, OcrWordSchema } from "../../shared/api";
 import { HanziWordCard } from "./Cards";
 import { IconClose } from "./Icons";
 
@@ -13,12 +13,12 @@ export function PhotoPage({
   photoUrl,
   w,
   h,
-  ocrResult,
+  page,
 }: {
   photoUrl: string;
   w: number;
   h: number;
-  ocrResult: OcrRes;
+  page: OcrPage;
 }): React.JSX.Element {
   const [ocrWord, setOcrWord] = useState<z.infer<typeof OcrWordSchema> | null>(null);
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
@@ -170,9 +170,9 @@ export function PhotoPage({
             onLoad={() => { if (imgRef.current) setImgScale(imgRef.current.clientWidth / (w || imgRef.current.naturalWidth || 1)); }}
           />
 
-          {ocrResult.positioned &&
+          {page.positioned &&
             imgScale > 0 &&
-            ocrResult.lines.flatMap((line, li) =>
+            page.lines.flatMap((line, li) =>
               line.words
                 .filter((wd) => wd.box)
                 .map((wd, wi) => {
@@ -201,7 +201,7 @@ export function PhotoPage({
                 }),
             )}
 
-          {ocrResult.positioned && imgScale > 0 && ocrWord?.box &&
+          {page.positioned && imgScale > 0 && ocrWord?.box &&
             (() => {
               const containerW = w * imgScale;
               const containerH = h * imgScale;
@@ -262,11 +262,11 @@ export function PhotoPage({
         pinch / double-tap / + to zoom · tap a word for its meaning
       </div>
 
-      {!ocrResult.positioned && (
+      {!page.positioned && (
         <>
           <div className="text-xs uppercase tracking-wide text-neutral-400">words (no positions detected)</div>
           <div className="flex flex-wrap gap-2">
-            {ocrResult.lines.flatMap((line, li) =>
+            {page.lines.flatMap((line, li) =>
               line.words.map((wd, wi) => {
                 const isSaved = wd.saved || savedNow.has(wd.traditional);
                 return (
