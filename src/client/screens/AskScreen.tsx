@@ -305,11 +305,7 @@ export function AskScreen(): React.JSX.Element {
               listening ? "bg-red-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"
             }`}
           >
-            {listening ? (
-              <span className="block h-3.5 w-3.5 rounded-[3px] bg-white" />
-            ) : (
-              <IconMic className="h-5 w-5" />
-            )}
+            <IconMic className="h-5 w-5" />
           </button>
           <label
             aria-label="Attach"
