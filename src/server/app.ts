@@ -107,7 +107,7 @@ async function storePhoto(bytes: Uint8Array): Promise<{ path: string; mime: stri
   const id = randomUUID();
   try {
     const sharp = (await import("sharp")).default;
-    const buf = await sharp(Buffer.from(bytes)).webp({ quality: 80 }).toBuffer();
+    const buf = await sharp(Buffer.from(bytes)).rotate().webp({ quality: 80 }).toBuffer();
     const meta = await sharp(buf).metadata();
     const path = `${dataDir()}/photos/${id}.webp`;
     await writeFile(path, buf);
@@ -475,7 +475,22 @@ async function buildPhrase(
     const lines: { words: z.infer<typeof OcrWordSchema>[] }[] = [];
     const lineTexts: string[] = [];
     let positioned = false;
+    // model dir labels are noisy (measured: a horizontal poster fully tagged "v");
+    // box geometry is reliable — when they disagree, trust geometry
+    const lineDir = (
+      dir: "h" | "v" | undefined,
+      box: [number, number, number, number] | undefined,
+      chars: number,
+    ): "h" | "v" | undefined => {
+      if (!box) return dir;
+      const bw = box[2] - box[0];
+      const bh = box[3] - box[1];
+      if (bw > bh) return dir === "v" ? "h" : (dir ?? "h"); // wide box can't be a column
+      if (bh > bw && chars > 1) return dir === "h" ? "v" : (dir ?? "v"); // tall box can't be a row
+      return dir;
+    };
     for (const line of res.value.lines) {
+      const dir = lineDir(line.dir, line.box, [...line.text].length);
       lineTexts.push(line.text);
       const words: z.infer<typeof OcrWordSchema>[] = [];
       const segments = segmentHanzi(line.text);
@@ -487,7 +502,7 @@ async function buildPhrase(
         const segLen = [...seg].length;
         let box: [number, number, number, number] | undefined;
         if (line.box) {
-          if (line.dir === "v" && yCursor !== undefined) {
+          if (dir === "v" && yCursor !== undefined) {
             // vertical column: split the line box along Y by char count
             const hStep = ((line.box[3] - line.box[1]) * segLen) / totalChars;
             box = [line.box[0], Math.round(yCursor), line.box[2], Math.round(yCursor + hStep)];
@@ -500,13 +515,13 @@ async function buildPhrase(
           if (box) positioned = true;
         }
         if (hit) {
-          words.push({ ...hit, known: true, saved: savedSet.has(seg), box, dir: line.dir });
+          words.push({ ...hit, known: true, saved: savedSet.has(seg), box, dir });
           continue;
         }
         for (const ch of [...seg]) {
           const charHit = lookup(ch);
-          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch), dir: line.dir });
-          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, dir: line.dir });
+          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch), dir });
+          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, dir });
         }
       }
       if (words.length) lines.push({ words });

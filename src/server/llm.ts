@@ -412,7 +412,13 @@ export class GatewayOcrService implements OcrService {
       const b64 = Buffer.from(bytes).toString("base64");
       const dims = parseImageDims(bytes);
       const system =
-        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style). ${
+        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style).
+CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the poster's orientation:
+- A horizontal line of N characters has a WIDE-SHORT box (width ≈ N × char height) and dir "h".
+- A vertical column of N characters has a TALL-NARROW box (height ≈ N × char width) and dir "v".
+- On a VERTICAL roll-up banner, header pills and speech-bubble body text are usually HORIZONTAL lines
+  (wide-short, dir "h") even though the banner itself is tall. Do not label horizontal lines "v".
+- Only text physically printed as top-to-bottom columns (right side of traditional signs, 竖排) gets dir "v" with a tall-narrow box. ${
           dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
         }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.`;
       const user = [

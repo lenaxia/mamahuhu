@@ -13,7 +13,7 @@ const hasHan = (s: string): boolean => /\p{Script=Han}/u.test(s);
 
 /** Canonical upload geometry: height EXACTLY 1000px (width by aspect, capped 1600). */
 async function downscale(file: File): Promise<{ blob: Blob; w: number; h: number }> {
-  const bmp = await createImageBitmap(file).catch(() => null);
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => createImageBitmap(file).catch(() => null));
   if (!bmp) {
     const dims = await new Promise<{ w: number; h: number }>((resolve) => {
       const img = new Image();
