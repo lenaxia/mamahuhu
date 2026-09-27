@@ -6,3 +6,6 @@ data
 test-results
 playwright-report
 .local
+
+# canto spike: raw 27MB third-party data (see bench/canto-report.md); curated bundle will be committed
+vendor/canto/

@@ -1,0 +1,259 @@
+{
+  "model": "default",
+  "jyutping_accuracy": 0.47058823529411764,
+  "jyutping_errors": [
+    {
+      "word": "仔女",
+      "got": "zai2 neoi5",
+      "wants": [
+        "zai2 neoi2"
+      ],
+      "ok": false
+    },
+    {
+      "word": "香蕉",
+      "got": "saang1 gou1",
+      "wants": [
+        "hoeng1 ziu1"
+      ],
+      "ok": false
+    },
+    {
+      "word": "刷牙",
+      "got": "ceoi1 nga4",
+      "wants": [
+        "caat3 ngaa4"
+      ],
+      "ok": false
+    },
+    {
+      "word": "瞓覺",
+      "got": "fan3 gok3",
+      "wants": [
+        "fan3 gaau3"
+      ],
+      "ok": false
+    },
+    {
+      "word": "第日",
+      "got": "dai3 jat6",
+      "wants": [
+        "dai6 jat6"
+      ],
+      "ok": false
+    },
+    {
+      "word": "嬲",
+      "got": "niu5",
+      "wants": [
+        "nau1"
+      ],
+      "ok": false
+    },
+    {
+      "word": "靚",
+      "got": "ling3",
+      "wants": [
+        "leng3"
+      ],
+      "ok": false
+    },
+    {
+      "word": "掂",
+      "got": "dim1",
+      "wants": [
+        "dim3",
+        "dim6"
+      ],
+      "ok": false
+    },
+    {
+      "word": "佢哋",
+      "got": "geoi2 dei6",
+      "wants": [
+        "keoi5 dei6"
+      ],
+      "ok": false
+    },
+    {
+      "word": "咁樣",
+      "got": "gam3 joeng6",
+      "wants": [
+        "gam2 joeng2"
+      ],
+      "ok": false
+    },
+    {
+      "word": "立刻",
+      "got": "lik6 hak6",
+      "wants": [
+        "laap6 hak1",
+        "laap6 haak1",
+        "lap6 hak1",
+        "lap6 haak1"
+      ],
+      "ok": false
+    },
+    {
+      "word": "已經",
+      "got": "ji5 gan1",
+      "wants": [
+        "ji5 ging1"
+      ],
+      "ok": false
+    },
+    {
+      "word": "醫院",
+      "got": "jyun6 jyun6",
+      "wants": [
+        "ji1 jyun2"
+      ],
+      "ok": false
+    },
+    {
+      "word": "遮",
+      "got": "zhe1",
+      "wants": [
+        "ze1"
+      ],
+      "ok": false
+    },
+    {
+      "word": "背囊",
+      "got": "bui3 joeng4",
+      "wants": [
+        "bui3 nong4"
+      ],
+      "ok": false
+    },
+    {
+      "word": "校服",
+      "got": "haak6 fuk6",
+      "wants": [
+        "haau6 fuk6"
+      ],
+      "ok": false
+    },
+    {
+      "word": "圖書館",
+      "got": "leoi6 syu1 gong2",
+      "wants": [
+        "tou4 syu1 gun2"
+      ],
+      "ok": false
+    },
+    {
+      "word": "勞作",
+      "got": "lou4 zuk6",
+      "wants": [
+        "lou4 zok3"
+      ],
+      "ok": false
+    }
+  ],
+  "translation": [
+    {
+      "intent": "time for a bath",
+      "casual": "到時分沖涼喇",
+      "formal": "該洗澡了",
+      "jyut": "dou6 si4 fan1 cung1 loeng4 laa5",
+      "casual_markers": 1,
+      "formal_leak": [],
+      "jyut_dict": "dou3 si4 fan1 cung1 loeng4 laa3",
+      "jyut_syl_err": 0.3333333333333333
+    },
+    {
+      "intent": "do you want some water?",
+      "casual": "你想唔想飲啲水呀？",
+      "formal": "你想喝水吗？",
+      "jyut": "nei5 soeng2 m4 soeng2 jam2 di1 seoi2 aa3",
+      "casual_markers": 2,
+      "formal_leak": [],
+      "jyut_dict": "nei5 soeng2 m4 soeng2 jam2 di1 seoi2 aa5 ?(？)",
+      "jyut_syl_err": 0.2222222222222222
+    },
+    {
+      "intent": "put on your shoes, we're leaving",
+      "casual": "着返鞋，我哋行啦。",
+      "formal": "穿上鞋，我们走了。",
+      "jyut": "zoek6 faan4 haai4, ngo5 dei6 haang4 laa1.",
+      "casual_markers": 2,
+      "formal_leak": [],
+      "jyut_dict": "zoek6 faan1 haai4 ?(，) ngo5 dei6 haang4 laa1 dim2",
+      "jyut_syl_err": 0.3333333333333333
+    },
+    {
+      "intent": "be careful, the pot is hot!",
+      "casual": "小心啲，個煲好熱㗎！",
+      "formal": "小心，锅很烫！",
+      "jyut": "siu2 lam1 di1, go3 bou1 hou2 nit3 ge3",
+      "casual_markers": 1,
+      "formal_leak": [],
+      "jyut_dict": "siu2 sam1 di1 ?(，) go3 bou1 hou2 jit6 gaa3 ?(！)",
+      "jyut_syl_err": 0.5
+    },
+    {
+      "intent": "grandma is coming over tomorrow",
+      "casual": "阿嫲聽日嚟呀",
+      "formal": "奶奶明天要来。",
+      "jyut": "aa1 ma4 ting1 jat6 lai4 aa3",
+      "casual_markers": 1,
+      "formal_leak": [],
+      "jyut_dict": "aa3 maa4 ting1 jat6 lai4 aa5",
+      "jyut_syl_err": 0.5
+    },
+    {
+      "intent": "stop hitting your sister",
+      "casual": "唔好打你妹妹。",
+      "formal": "不要打你的妹妹。",
+      "jyut": "m4 hou2 daa2 nei5 lei6 tai6",
+      "casual_markers": 1,
+      "formal_leak": [],
+      "jyut_dict": "m4 hou2 daa1 nei5 mui4 mui2 dim2",
+      "jyut_syl_err": 0.5714285714285714
+    },
+    {
+      "intent": "where did you put your backpack?",
+      "casual": "你個書包放咗喺邊度呀？",
+      "formal": "你把书包放在哪里了？",
+      "jyut": "nei5 go3 syu1 baau1 fong3 zo2 zeoi6 bin1 dou6 aa3",
+      "casual_markers": 2,
+      "formal_leak": [],
+      "jyut_dict": "nei5 go3 syu1 baau1 fong3 zo2 hai2 bin1 dou6 aa5 ?(？)",
+      "jyut_syl_err": 0.2727272727272727
+    },
+    {
+      "intent": "time for school, don't be late",
+      "casual": "去上學喇，唔好遲到呀。",
+      "formal": "該上學了，不要遲到。",
+      "jyut": "heoi soeng hok laa, m4 hou ci4 dou3 nga1.",
+      "casual_markers": 2,
+      "formal_leak": [],
+      "jyut_dict": "heoi3 soeng5 hok6 laa3 ?(，) m4 hou2 ci4 dou3 aa5 dim2",
+      "jyut_syl_err": 0.7272727272727273
+    },
+    {
+      "intent": "i love you so much",
+      "casual": "我好鍾意你呀",
+      "formal": "我非常愛你",
+      "jyut": "ngo5 dou2 zung1 ji3 nei5 aa3",
+      "casual_markers": 0,
+      "formal_leak": [],
+      "jyut_dict": "ngo5 hou2 zung1 ji3 nei5 aa5",
+      "jyut_syl_err": 0.3333333333333333
+    },
+    {
+      "intent": "finish your homework first, then play",
+      "casual": "做完功課先玩啦",
+      "formal": "先做完功課再玩",
+      "jyut": "zou6 mun4 gung4 fo3 sin1 wun3 laa1",
+      "casual_markers": 1,
+      "formal_leak": [],
+      "jyut_dict": "zou6 jyun4 gung1 fo3 sin1 waan2 laa1",
+      "jyut_syl_err": 0.42857142857142855
+    }
+  ],
+  "formal_leak_rate": 0,
+  "casual_without_markers_rate": 0.1,
+  "in_situ_jyutping_syllable_error_rate": 0.4222222222222222
+}
