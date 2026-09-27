@@ -162,7 +162,13 @@ export function PhotoPage({
             transformOrigin: "0 0",
           }}
         >
-          <img ref={imgRef} src={photoUrl} alt="page" className="block w-full" onLoad={() => { if (imgRef.current) setImgScale(imgRef.current.clientWidth / (w || imgRef.current.naturalWidth || 1)); }} />
+          <img
+            ref={imgRef}
+            src={photoUrl}
+            alt="page"
+            className="block w-full"
+            onLoad={() => { if (imgRef.current) setImgScale(imgRef.current.clientWidth / (w || imgRef.current.naturalWidth || 1)); }}
+          />
 
           {ocrResult.positioned &&
             imgScale > 0 &&

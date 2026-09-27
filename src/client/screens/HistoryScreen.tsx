@@ -107,16 +107,21 @@ export function HistoryScreen(): React.JSX.Element {
 
       {/* photos get the full screen; text stays in the drawer */}
       {open?.kind === "ocr" && open.photoUrl ? (
-        <FullScreen open onClose={() => setOpen(null)} label="photo">
-          <div className="rounded-xl bg-neutral-900 p-1">
-            <PhotoPage photoUrl={open.photoUrl} w={open.photoW} h={open.photoH} ocrResult={open.result as OcrRes} />
-          </div>
-          <button
-            onClick={() => void removeOne(open.id)}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-red-950/60 py-2.5 text-sm font-medium text-red-400"
-          >
-            <IconTrash className="h-4 w-4" /> delete this entry
-          </button>
+        <FullScreen
+          open
+          onClose={() => setOpen(null)}
+          label="photo"
+          actions={
+            <button
+              aria-label="Delete entry"
+              onClick={() => void removeOne(open.id)}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-red-400"
+            >
+              <IconTrash className="h-5 w-5" />
+            </button>
+          }
+        >
+          <PhotoPage photoUrl={open.photoUrl} w={open.photoW} h={open.photoH} ocrResult={open.result as OcrRes} />
         </FullScreen>
       ) : (
         <Sheet open={open !== null} onClose={() => setOpen(null)} title="From history">
