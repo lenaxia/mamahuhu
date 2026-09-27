@@ -174,3 +174,53 @@ export class MicRecorder {
     this.stream = null;
   }
 }
+
+/** Live mic amplitude for the in-input waveform while listening. */
+export class LevelMeter {
+  private ctx: AudioContext | null = null;
+  private stream: MediaStream | null = null;
+  private raf = 0;
+  private analyser: AnalyserNode | null = null;
+  private data: Uint8Array<ArrayBuffer> | null = null;
+
+  async start(onLevels: (bars: number[]) => void): Promise<void> {
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.ctx = new AudioContext();
+      const src = this.ctx.createMediaStreamSource(this.stream);
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 256;
+      src.connect(this.analyser);
+      this.data = new Uint8Array(new ArrayBuffer(this.analyser.frequencyBinCount));
+      const BARS = 24;
+      let last = 0;
+      const tick = () => {
+        this.raf = requestAnimationFrame(tick);
+        const now = performance.now();
+        if (now - last < 66) return; // ~15fps is plenty
+        last = now;
+        this.analyser!.getByteFrequencyData(this.data!);
+        const bars: number[] = [];
+        const step = Math.floor(this.data!.length / BARS);
+        for (let i = 0; i < BARS; i++) {
+          let sum = 0;
+          for (let j = 0; j < step; j++) sum += this.data![i * step + j]!;
+          bars.push(Math.min(1, sum / step / 140));
+        }
+        onLevels(bars);
+      };
+      this.raf = requestAnimationFrame(tick);
+    } catch {
+      /* visualizer is best-effort */
+    }
+  }
+
+  stop(): void {
+    cancelAnimationFrame(this.raf);
+    this.stream?.getTracks().forEach((t) => t.stop());
+    void this.ctx?.close().catch(() => undefined);
+    this.ctx = null;
+    this.stream = null;
+    this.analyser = null;
+  }
+}

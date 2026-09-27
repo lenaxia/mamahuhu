@@ -7,7 +7,7 @@ import { Segmented } from "../components/Segmented";
 import { OcrView } from "../components/OcrView";
 import { IconCamera, IconMic, IconSend, IconClose } from "../components/Icons";
 import { useMe } from "../state";
-import { BrowserRecognizer, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
+import { BrowserRecognizer, LevelMeter, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
 
 const hasHan = (s: string): boolean => /\p{Script=Han}/u.test(s);
 
@@ -55,12 +55,17 @@ export function AskScreen(): React.JSX.Element {
   const [sttResult, setSttResult] = useState<import("../../shared/api").SttRes | null>(null);
   const recognizer = useRef<BrowserRecognizer | null>(null);
   const micRec = useRef<MicRecorder | null>(null);
+  const meter = useRef<LevelMeter | null>(null);
+  const [levels, setLevels] = useState<number[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const anythingActive =
     Boolean(translateCard || interps || cands || hanziWords || ocrResult || sttResult || listening || spokenText || ocrBusy);
 
   function reset(): void {
+    meter.current?.stop();
+    meter.current = null;
+    setLevels([]);
     setError(null);
     setTranslateCard(null);
     setInterps(null);
@@ -181,6 +186,9 @@ export function AskScreen(): React.JSX.Element {
     setError(null);
     if (listening) {
       setListening(false);
+      meter.current?.stop();
+      meter.current = null;
+      setLevels([]);
       if (micRec.current?.active) {
         try {
           const blob = await micRec.current.stop();
@@ -202,11 +210,18 @@ export function AskScreen(): React.JSX.Element {
       return;
     }
     reset();
+    const lm = new LevelMeter();
+    meter.current = lm;
+    void lm.start(setLevels);
     if (sttServerMode()) {
       const rec = new MicRecorder();
       micRec.current = rec;
       const ok = await rec.start((m) => setError(m));
-      if (ok) setListening(true);
+      if (!ok) {
+        lm.stop();
+        meter.current = null;
+        setLevels([]);
+      } else setListening(true);
       return;
     }
     if (!browserSttSupported()) {
@@ -222,6 +237,9 @@ export function AskScreen(): React.JSX.Element {
       (finalText, confidence) => {
         setListening(false);
         setInterim("");
+        meter.current?.stop();
+        meter.current = null;
+        setLevels([]);
         setSpokenConfidence(confidence ?? null);
         if (!finalText) return;
         setSpokenText(finalText);
@@ -231,6 +249,9 @@ export function AskScreen(): React.JSX.Element {
       (m) => {
         setListening(false);
         setError(m);
+        meter.current?.stop();
+        meter.current = null;
+        setLevels([]);
       },
       (lang) => void lang,
     );
@@ -246,10 +267,12 @@ export function AskScreen(): React.JSX.Element {
         }}
         className="rounded-2xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-2 shadow-sm"
       >
-        <textarea
-          ref={taRef}
-          value={text}
-          rows={2}
+        <div className="relative">
+          <textarea
+            ref={taRef}
+            value={listening ? interim || "" : text}
+            readOnly={listening}
+            rows={2}
           onChange={(e) => {
             setText(e.target.value);
             e.target.style.height = "auto";
@@ -259,18 +282,34 @@ export function AskScreen(): React.JSX.Element {
           autoCapitalize="none"
           autoCorrect="off"
           enterKeyHint="send"
-          className="max-h-40 w-full resize-none rounded-xl bg-transparent px-2 py-2 outline-none"
-        />
+            className="max-h-40 w-full resize-none rounded-xl bg-transparent px-2 py-2 outline-none"
+          />
+          {listening && (
+            <div className="pointer-events-none absolute inset-x-3 bottom-1 flex h-4 items-center justify-center gap-[2px]">
+              {Array.from({ length: 24 }).map((_, i) => (
+                <span
+                  key={i}
+                  className="w-[3px] rounded-full bg-red-500"
+                  style={{ height: `${Math.max(8, (levels[i] ?? 0) * 100)}%`, transition: "height 60ms" }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
         <div className="mt-1 flex items-center gap-1.5">
           <button
             type="button"
             aria-label="Speak"
             onClick={() => void toggleMic()}
             className={`flex h-11 w-11 items-center justify-center rounded-full transition ${
-              listening ? "bg-red-500 text-white animate-pulse" : "bg-neutral-100 dark:bg-neutral-800"
+              listening ? "bg-red-500 text-white" : "bg-neutral-100 dark:bg-neutral-800"
             }`}
           >
-            <IconMic className="h-5 w-5" />
+            {listening ? (
+              <span className="block h-3.5 w-3.5 rounded-[3px] bg-white" />
+            ) : (
+              <IconMic className="h-5 w-5" />
+            )}
           </button>
           <label
             aria-label="Attach"
@@ -313,18 +352,6 @@ export function AskScreen(): React.JSX.Element {
         </div>
       )}
 
-      {listening && (
-        <button
-          onClick={() => void toggleMic()}
-          className="flex w-full flex-col items-center gap-3 rounded-2xl border-2 border-red-400 dark:border-red-800 bg-red-50 dark:bg-red-950/30 py-6 active:scale-[0.99] transition"
-        >
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500 text-white animate-pulse">
-            <IconMic className="h-6 w-6" />
-          </span>
-          <p className="text-sm font-medium text-red-600 dark:text-red-400">listening — tap to stop</p>
-          {interim && <p className="hanzi text-lg text-neutral-800 dark:text-neutral-200">{interim}</p>}
-        </button>
-      )}
 
       {ocrBusy && <div className="animate-pulse text-sm text-neutral-400">Reading the page…</div>}
       {busy === "lookup" && <div className="animate-pulse text-sm text-neutral-400">Looking up…</div>}
