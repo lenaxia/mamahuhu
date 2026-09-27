@@ -13,6 +13,31 @@ import { createRequire } from "node:module";
 
 const req = createRequire(import.meta.url);
 
+let simpToTradMap: Map<string, string> | null = null;
+
+/** Character-level simplified→traditional map derived from CEDICT 1:1 pairs. */
+export function simpToTrad(ch: string): string {
+  if (!simpToTradMap) {
+    simpToTradMap = new Map();
+    const words = loadCedict();
+    for (const w of words) {
+      const s = [...w.simplified];
+      const t = [...w.traditional];
+      if (s.length === t.length) {
+        for (let i = 0; i < s.length; i++) {
+          if (s[i] !== t[i] && !simpToTradMap.has(s[i]!)) simpToTradMap.set(s[i]!, t[i]!);
+        }
+      }
+    }
+  }
+  return simpToTradMap.get(ch) ?? ch;
+}
+
+/** Converts any Han string to its traditional form (char-level). */
+export function toTraditional(text: string): string {
+  return [...text].map((c) => simpToTrad(c)).join("");
+}
+
 /** Loads CC-CEDICT from the cedict-json package (bundled data, ~122k entries). */
 export function loadCedict(): DictWord[] {
   const raw = req("cedict-json") as unknown;

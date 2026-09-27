@@ -60,6 +60,7 @@ import {
 import { candidates, interpret, normalizePinyinInput, renderWord, segmentHanzi } from "../shared/fuzzy";
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
 import { parseImageDims } from "./imageinfo";
+import { toTraditional } from "../shared/cedict";
 import type { AskKind } from "../shared/api";
 import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService, DescribeService, TaggingService, FollowUpService } from "./ports";
 
@@ -383,7 +384,7 @@ async function buildPhrase(
     if (!parsed.success) return c.json({ error: "bad request" }, 400);
     const lookup = (seg: string): z.infer<typeof HanziWordSchema> | null => {
       const hit = pickSense(seg);
-      return hit && hit.traditional === seg ? { ...hit, known: true } : null;
+      return hit && (hit.traditional === seg || hit.simplified === seg) ? { ...hit, known: true } : null;
     };
     const words: z.infer<typeof HanziWordSchema>[] = [];
     for (const seg of segmentHanzi(parsed.data.text)) {
@@ -420,7 +421,7 @@ async function buildPhrase(
     const savedSet = new Set(savedRows.map((r) => r.traditional));
     const lookup = (seg: string) => {
       const hit = pickSense(seg);
-      return hit && hit.traditional === seg ? hit : null;
+      return hit && (hit.traditional === seg || hit.simplified === seg) ? hit : null;
     };
     if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
       // PDF: render pages to images → same vision-OCR pipeline per page
@@ -533,7 +534,7 @@ async function buildPhrase(
           if (box) positioned = true;
         }
         if (hit) {
-          words.push({ ...hit, known: true, saved: savedSet.has(seg), box, dir });
+          words.push({ ...hit, known: true, saved: savedSet.has(hit.traditional), box, dir });
           continue;
         }
         // char decomposition: split the segment box across its chars so no
@@ -551,8 +552,8 @@ async function buildPhrase(
             ];
           }
           const charHit = lookup(ch);
-          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch), box: chBox, dir });
-          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, box: chBox, dir });
+          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(charHit.traditional), box: chBox, dir });
+          else words.push({ traditional: toTraditional(ch), simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, box: chBox, dir });
         });
       }
       if (words.length) lines.push({ words });
@@ -622,7 +623,7 @@ async function buildPhrase(
 
     const hanziLookup = (seg: string): z.infer<typeof HanziWordSchema> | null => {
       const hit = pickSense(seg);
-      return hit && hit.traditional === seg ? { ...hit, known: true } : null;
+      return hit && (hit.traditional === seg || hit.simplified === seg) ? { ...hit, known: true } : null;
     };
     const hanziFor = (t: string) => {
       const words: z.infer<typeof HanziWordSchema>[] = [];

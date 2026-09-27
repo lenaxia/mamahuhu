@@ -637,3 +637,27 @@ describe("vertical text direction", () => {
     expect(ws[0].box[2] - ws[0].box[0]).toBeGreaterThan(0);
   });
 });
+
+describe("simplified → traditional display", () => {
+  it("unknown simplified chars render as traditional", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "营" }),
+    });
+    const body = await res.json();
+    expect(body.words[0].traditional).toBe("營");
+    expect(body.words[0].simplified).toBe("营");
+  });
+
+  it("dictionary hits already display traditional", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "亲近" }),
+    });
+    const body = await res.json();
+    const joined = body.words.map((w: { traditional: string }) => w.traditional).join("");
+    expect(joined).toBe("親近");
+  });
+});
