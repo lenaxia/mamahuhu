@@ -298,8 +298,8 @@ describe("tts mode selection", () => {
       const s = await (await a.request("/api/tts/status")).json();
       expect(s).toEqual({ available: false, mode: "browser" });
     } finally {
-      process.env.TTS_MODE = undefined;
-      process.env.MODEL_TTS = undefined;
+      delete process.env.TTS_MODE;
+      delete process.env.MODEL_TTS;
     }
   });
 
@@ -425,7 +425,9 @@ describe("DATA_DIR storage root", () => {
       expect(files[0]).toMatch(/\.webp$/);
       rmSync("./data-test", { recursive: true, force: true });
     } finally {
-      process.env.DATA_DIR = undefined;
+      // delete (not `= undefined`): assigning undefined stores the STRING "undefined",
+      // leaking a bogus DATA_DIR into every test that runs after this one.
+      delete process.env.DATA_DIR;
     }
   });
 });
@@ -682,9 +684,9 @@ describe("tts disk cache", () => {
       }
       rmSync("./data/audio", { recursive: true, force: true });
     } finally {
-      process.env.MODEL_TTS = undefined;
-      process.env.LLM_MOCK = undefined;
-      process.env.TTS_MODE = undefined;
+      delete process.env.MODEL_TTS;
+      delete process.env.LLM_MOCK;
+      delete process.env.TTS_MODE;
     }
   });
 });
