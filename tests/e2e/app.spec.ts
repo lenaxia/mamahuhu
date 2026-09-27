@@ -98,6 +98,12 @@ test("photo mode: upload with mocked OCR, tap word, save", async ({ page }) => {
   // dad already saved 睡覺 in an earlier test → badge present
   await expect(page.locator('[data-ocr-word="小貓"]')).toBeVisible();
   await page.locator('[data-ocr-word="小貓"]').click();
+  // definition popover anchored on the image, dismissible via X
+  await expect(page.getByLabel("Close")).toBeVisible();
+  await expect(page.getByText("cat")).toBeVisible();
+  await page.getByLabel("Close").click();
+  await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await page.locator('[data-ocr-word="小貓"]').click();
   await page.getByRole("button", { name: "Save" }).first().click();
   await expect(page.getByText("Saved").first()).toBeVisible();
 });

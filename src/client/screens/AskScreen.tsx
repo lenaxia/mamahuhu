@@ -5,7 +5,7 @@ import { api, ApiError } from "../api";
 import { CandidateCard, HanziWordCard, InterpretationCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
-import { IconCamera, IconKeyboard, IconMic, IconSend } from "../components/Icons";
+import { IconCamera, IconClose, IconKeyboard, IconMic, IconSend } from "../components/Icons";
 import { useMe } from "../state";
 
 type Mode = "type" | "speak" | "photo";
@@ -178,6 +178,10 @@ export function AskScreen(): React.JSX.Element {
                         const [x1, y1, x2, y2] = w.box!;
                         const isSaved = w.saved || savedNow.has(w.traditional);
                         const boxH = (y2 - y1) * imgScale;
+                        const boxW = (x2 - x1) * imgScale;
+                        const chars = [...w.traditional].length || 1;
+                        // fit the text to the box: height-bound and width-bound
+                        const fontSize = Math.max(10, Math.min(boxH * 0.78, boxW / (chars * 1.2), 40));
                         return (
                           <button
                             key={`${li}-${wi}`}
@@ -186,9 +190,10 @@ export function AskScreen(): React.JSX.Element {
                             style={{
                               left: x1 * imgScale,
                               top: y1 * imgScale,
-                              width: (x2 - x1) * imgScale,
+                              width: boxW,
                               height: boxH,
-                              fontSize: Math.max(11, Math.min(boxH * 0.55, 30)),
+                              fontSize,
+                              lineHeight: 1.1,
                             }}
                             className={`hanzi absolute flex items-center justify-center overflow-hidden rounded-md border px-0.5 transition ${
                               ocrWord?.traditional === w.traditional
@@ -204,6 +209,36 @@ export function AskScreen(): React.JSX.Element {
                         );
                       }),
                   )}
+
+                {/* definition popover anchored under the selected box */}
+                {ocrResult.positioned &&
+                  imgScale > 0 &&
+                  ocrWord?.box &&
+                  photo &&
+                  (() => {
+                    const containerW = photo.w * imgScale;
+                    const containerH = photo.h * imgScale;
+                    const [x1, y1, , y2] = ocrWord.box;
+                    const panelW = Math.min(containerW - 16, 320);
+                    const panelH = 200;
+                    const left = Math.min(Math.max(8, x1 * imgScale), Math.max(8, containerW - panelW - 8));
+                    let top = y2 * imgScale + 8;
+                    if (top + panelH > containerH - 8) top = Math.max(8, y1 * imgScale - panelH - 8);
+                    return (
+                      <div className="absolute z-20 drop-shadow-xl" style={{ left, top, width: panelW }}>
+                        <div className="relative">
+                          <button
+                            aria-label="Close"
+                            onClick={() => setOcrWord(null)}
+                            className="absolute -right-2 -top-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-white shadow-lg dark:bg-white dark:text-neutral-900"
+                          >
+                            <IconClose className="h-4 w-4" />
+                          </button>
+                          <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} />
+                        </div>
+                      </div>
+                    );
+                  })()}
               </div>
 
               {/* fallback chips for words without boxes */}
@@ -233,7 +268,7 @@ export function AskScreen(): React.JSX.Element {
               )}
 
               <div className="text-center text-[11px] text-neutral-400">tap a word on the page</div>
-              {ocrWord && (
+              {ocrWord && !ocrResult.positioned && (
                 <HanziWordCard
                   word={ocrWord}
                   onSaved={(t) => setSavedNow((s) => new Set(s).add(t))}
