@@ -51,6 +51,8 @@ export interface TranslationService {
   translate(text: string, opts?: TranslateOptions): Promise<Result<TranslateOutcome>>;
   /** natural one-line English gloss of a Mandarin phrase (zh→en) */
   glossZh(text: string): Promise<Result<string>>;
+  /** answer a zh meta-question about language (how-to-say / what-does-it-mean) in one English line */
+  answerZh(text: string): Promise<Result<string>>;
 }
 
 /** Text-to-speech. Implementations: gateway model, or unavailable (client falls back to browser). */

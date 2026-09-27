@@ -167,6 +167,8 @@ export const HanziPhraseSchema = z.object({
   pinyin: z.string(),
   bpmf: z.string(),
   english: z.string(),
+  /** true when english is the ANSWER to a zh meta-question, not a translation */
+  answer: z.boolean().default(false),
 });
 export type HanziPhrase = z.infer<typeof HanziPhraseSchema>;
 export const HanziResSchema = z.object({ words: z.array(HanziWordSchema), phrase: HanziPhraseSchema.optional() });

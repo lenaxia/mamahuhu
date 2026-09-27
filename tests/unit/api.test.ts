@@ -501,3 +501,38 @@ describe("meta-questions (situation type)", () => {
     expect(card.casual.traditional).toContain("恭喜發財");
   });
 });
+
+describe("chinese questions", () => {
+  it("picks common senses, not surname entries", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "坐" }),
+    });
+    const body = await res.json();
+    expect(body.words[0].english.toLowerCase()).toContain("sit");
+  });
+
+  it("zh meta-questions get an answer card, not a translation", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "飛機的英文怎麼說" }),
+    });
+    const body = await res.json();
+    expect(body.phrase).toBeTruthy();
+    expect(body.phrase.answer).toBe(true);
+    expect(body.phrase.english).toBe("airplane");
+  });
+
+  it("plain zh questions keep the meaning card", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "你怎麼坐飛機" }),
+    });
+    const body = await res.json();
+    expect(body.phrase.answer).toBe(false);
+    expect(body.phrase.english.length).toBeGreaterThan(0);
+  });
+});

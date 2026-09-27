@@ -145,7 +145,7 @@ export function PhraseCard({
   };
   return (
     <div data-traditional={phrase.traditional} className="rounded-2xl border-2 border-amber-300 dark:border-amber-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
-      <div className="text-xs uppercase tracking-wide text-amber-600 dark:text-amber-400">whole phrase</div>
+      <div className="text-xs uppercase tracking-wide text-amber-600 dark:text-amber-400">{phrase.answer ? "answer" : "whole phrase"}</div>
       <AnnotatedText syllables={syllables} annotations={annotations} />
       <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{phrase.english}</p>
       <ActionRow text={phrase.traditional} saved={saved} onSave={() => void save(asWord, syllables)} />

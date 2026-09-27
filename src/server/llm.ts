@@ -183,6 +183,19 @@ export class LlmTranslationService implements TranslationService {
     const gloss = res.value.trim().replace(/^["'「」]+|["'「」]+$/g, "");
     return gloss ? { ok: true, value: gloss } : { ok: false, error: "empty gloss" };
   }
+
+  async answerZh(text: string): Promise<Result<string>> {
+    const res = await this.chat.complete(
+      [
+        { role: "system", content: "The user asks a question in Mandarin about language — how to say something in English, what something means, or how to write something. Reply with ONLY the answer itself in one short line of English (the English word/phrase requested, or the meaning). No pinyin, no Chinese, no explanation." },
+        { role: "user", content: text },
+      ],
+      { model: this.model, temperature: 0.2, maxTokens: 120 },
+    );
+    if (!res.ok) return res;
+    const answer = res.value.trim().replace(/^["'「」]+|["'「」]+$/g, "");
+    return answer ? { ok: true, value: answer } : { ok: false, error: "empty answer" };
+  }
 }
 
 export class MockTranslationService implements TranslationService {
@@ -309,6 +322,10 @@ export class MockTranslationService implements TranslationService {
 
   async glossZh(text: string): Promise<Result<string>> {
     return { ok: true, value: text.includes("睡覺") ? "I want to sleep." : "mock phrase gloss" };
+  }
+
+  async answerZh(text: string): Promise<Result<string>> {
+    return { ok: true, value: text.includes("飛機") ? "airplane" : "mock answer" };
   }
 }
 

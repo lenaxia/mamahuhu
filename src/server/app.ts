@@ -28,6 +28,7 @@ import {
   TranslateResSchema,
   type Annotations,
   type Entry,
+  type RenderedWord,
   type CardVariant,
   type Syllables,
 } from "../shared/api";
@@ -232,18 +233,43 @@ async function buildPhrase(
   words: z.infer<typeof HanziWordSchema>[],
 ): Promise<z.infer<typeof HanziPhraseSchema> | undefined> {
   if (words.length < 2) return undefined;
+  const han = words.map((w) => w.traditional).join("");
+  // zh meta-question (how-to-say-in-English / what-does-it-mean) → answer, don't translate
+  const META = /(英文|english|怎麼說|怎麼講|什麼意思|甚麼意思|意思是|怎麼寫)/i;
+  if (META.test(text) || META.test(han)) {
+    const answer = await deps.translations.answerZh(text);
+    if (answer.ok) {
+      return {
+        traditional: han,
+        simplified: words.map((w) => w.simplified).join(""),
+        pinyin: words.map((w) => w.pinyin).filter(Boolean).join(" "),
+        bpmf: words.map((w) => w.bpmf).filter(Boolean).join(" "),
+        english: answer.value,
+        answer: true,
+      };
+    }
+  }
   const gloss = await deps.translations.glossZh(text);
   if (!gloss.ok) return undefined;
   return {
-    traditional: words.map((w) => w.traditional).join(""),
+    traditional: han,
     simplified: words.map((w) => w.simplified).join(""),
     pinyin: words.map((w) => w.pinyin).filter(Boolean).join(" "),
     bpmf: words.map((w) => w.bpmf).filter(Boolean).join(" "),
     english: gloss.value,
+    answer: false,
   };
 }
 
   const app: App = new Hono<{ Variables: { user: UserRow } }>();
+
+  /** first dictionary sense that isn't a surname/variant note (坐 = "sit", not "surname Zuo") */
+  const pickSense = (trad: string): RenderedWord | null => {
+    const entries = dictionary.byTrad.get(trad);
+    if (!entries?.length) return null;
+    const hit = entries.find((e) => !/^(surname|variant of|old variant|see )/i.test(e.english)) ?? entries[0]!;
+    return renderWord(hit);
+  };
 
   app.get("/healthz", (c) => c.json({ ok: true, dictEntries: dictionary.count }));
   app.use("/api/*", identityMiddleware(sql));
@@ -320,9 +346,8 @@ async function buildPhrase(
     const parsed = HanziReqSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "bad request" }, 400);
     const lookup = (seg: string): z.infer<typeof HanziWordSchema> | null => {
-      const hit = dictionary.byTrad.get(seg)?.[0];
-      if (hit && hit.traditional === seg) return { ...renderWord(hit), known: true };
-      return null;
+      const hit = pickSense(seg);
+      return hit && hit.traditional === seg ? { ...hit, known: true } : null;
     };
     const words: z.infer<typeof HanziWordSchema>[] = [];
     for (const seg of segmentHanzi(parsed.data.text)) {
@@ -360,8 +385,8 @@ async function buildPhrase(
     const savedSet = new Set(savedRows.map((r) => r.traditional));
 
     const lookup = (seg: string) => {
-      const hit = dictionary.byTrad.get(seg)?.[0];
-      return hit && hit.traditional === seg ? renderWord(hit) : null;
+      const hit = pickSense(seg);
+      return hit && hit.traditional === seg ? hit : null;
     };
     const lines: { words: z.infer<typeof OcrWordSchema>[] }[] = [];
     const lineTexts: string[] = [];
@@ -414,8 +439,8 @@ async function buildPhrase(
     const { text, language } = res.value;
 
     const hanziLookup = (seg: string): z.infer<typeof HanziWordSchema> | null => {
-      const hit = dictionary.byTrad.get(seg)?.[0];
-      return hit && hit.traditional === seg ? { ...renderWord(hit), known: true } : null;
+      const hit = pickSense(seg);
+      return hit && hit.traditional === seg ? { ...hit, known: true } : null;
     };
     const hanziFor = (t: string) => {
       const words: z.infer<typeof HanziWordSchema>[] = [];
