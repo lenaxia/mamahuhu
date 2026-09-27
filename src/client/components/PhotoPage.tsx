@@ -190,12 +190,22 @@ export function PhotoPage({
                   const fontSize = tall
                     ? Math.max(6, Math.min((boxW - 4) * 0.9, ((boxH - 4) / n) * 0.95, 40))
                     : Math.max(6, Math.min((boxH - 4) * 0.85, (boxW - 4) / n, 40));
+                  // visible chip hugs the text (model boxes carry padding), centered in the box
+                  const chipW = tall ? Math.min(boxW, fontSize * 1.35) : Math.min(boxW, n * fontSize * 1.18);
+                  const chipH = tall ? Math.min(boxH, n * fontSize * 1.15) : Math.min(boxH, fontSize * 1.4);
                   return (
                     <button
                       key={`${li}-${wi}`}
                       data-ocr-word={wd.traditional}
                       onClick={() => setOcrWord(ocrWord?.traditional === wd.traditional ? null : wd)}
-                      style={{ left: x1 * imgScale, top: y1 * imgScale, width: boxW, height: boxH, fontSize, lineHeight: 1.1 }}
+                      style={{
+                        left: x1 * imgScale + (boxW - chipW) / 2,
+                        top: y1 * imgScale + (boxH - chipH) / 2,
+                        width: chipW,
+                        height: chipH,
+                        fontSize,
+                        lineHeight: 1.1,
+                      }}
                       className={`hanzi absolute flex ${tall ? "flex-col" : "flex-row"} items-center justify-center overflow-hidden rounded-md border px-0.5 ${
                         ocrWord?.traditional === wd.traditional
                           ? "border-amber-500 bg-amber-500/40 text-amber-900 dark:text-amber-100"
