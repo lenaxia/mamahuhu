@@ -34,11 +34,11 @@ export class BrowserRecognizer {
   private rec: any = null;
   private switched = false;
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
-  private cbs: { onInterim: (t: string) => void; onFinal: (t: string) => void; onError: (m: string) => void; onLang: (l: SttLang) => void } | null = null;
+  private cbs: { onInterim: (t: string) => void; onFinal: (t: string, confidence?: number) => void; onError: (m: string) => void; onLang: (l: SttLang) => void } | null = null;
 
   startAuto(
     onInterim: (text: string) => void,
-    onFinal: (text: string) => void,
+    onFinal: (text: string, confidence?: number) => void,
     onError: (msg: string) => void,
     onLang?: (lang: SttLang) => void,
   ): void {
@@ -82,7 +82,11 @@ export class BrowserRecognizer {
       }
       if (final) {
         if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
-        this.cbs?.onFinal(final.trim());
+        // final results carry a 0-1 confidence (Chrome; Safari often 0 = unknown)
+        const conf = typeof e.results[e.results.length - 1][0]?.confidence === "number"
+          ? e.results[e.results.length - 1][0].confidence as number
+          : undefined;
+        this.cbs?.onFinal(final.trim(), conf && conf > 0 ? conf : undefined);
       }
     };
     rec.onerror = (e: any) => {

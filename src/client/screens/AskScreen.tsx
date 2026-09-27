@@ -5,7 +5,7 @@ import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard } from "..
 import { PhotoPage } from "../components/PhotoPage";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
-import { IconCamera, IconClose, IconKeyboard, IconMic, IconPencil, IconSend } from "../components/Icons";
+import { IconCamera, IconClose, IconKeyboard, IconMic, IconSend } from "../components/Icons";
 import { useMe } from "../state";
 import { BrowserRecognizer, MicRecorder, browserSttSupported, sttServerMode } from "../stt";
 import type { SttRes } from "../../shared/api";
@@ -63,10 +63,10 @@ export function AskScreen(): React.JSX.Element {
   const [detectedLang, setDetectedLang] = useState<string>("");
   const [interim, setInterim] = useState("");
   const [spokenText, setSpokenText] = useState<string | null>(null);
+  const [spokenConfidence, setSpokenConfidence] = useState<number | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
   const [sttResult, setSttResult] = useState<SttRes | null>(null);
   const recognizer = useRef<BrowserRecognizer | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const micRec = useRef<MicRecorder | null>(null);
 
   function reset(): void {
@@ -192,9 +192,10 @@ export function AskScreen(): React.JSX.Element {
     setDetectedLang("");
     r.startAuto(
       (t) => setInterim(t),
-      (finalText) => {
+      (finalText, confidence) => {
         setListening(false);
         setInterim("");
+        setSpokenConfidence(confidence ?? null);
         if (!finalText) return;
         setSpokenText(finalText);
         setText(finalText);
@@ -323,7 +324,6 @@ export function AskScreen(): React.JSX.Element {
       >
         <div className="flex gap-2">
           <input
-            ref={inputRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="English or rough pinyin — “time for a bath”, “gai shui jiao le”"
@@ -347,18 +347,11 @@ export function AskScreen(): React.JSX.Element {
 
       {/* results render for every mode (speak routes here too) */}
       {spokenText && mode === "speak" && (
-        <div className="flex items-center gap-2 text-xs text-neutral-400">
+        <div className="text-xs text-neutral-400">
           <span className="uppercase tracking-wide">heard: “{spokenText}”</span>
-          <button
-            aria-label="Fix transcript"
-            onClick={() => {
-              setMode("type");
-              requestAnimationFrame(() => inputRef.current?.focus());
-            }}
-            className="flex items-center gap-1 text-sky-600 dark:text-sky-400 underline underline-offset-2"
-          >
-            <IconPencil className="h-3.5 w-3.5" /> fix it
-          </button>
+          {spokenConfidence !== null && spokenConfidence < 0.7 && (
+            <span className="ml-2 text-amber-600 dark:text-amber-400">low confidence — maybe retry &amp; enunciate</span>
+          )}
         </div>
       )}
       {busy === "lookup" && <div className="animate-pulse text-sm text-neutral-400">Looking up…</div>}

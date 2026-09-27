@@ -121,6 +121,9 @@ Rules:
 - "casual" is colloquial, everyday spoken Mandarin; "formal" is standard, polite, written/official register.
   If an audience hint is provided, tune BOTH registers to that audience — but never mention the audience in notes.
 - Honor inline disambiguation in the input (e.g. "not the plane itself" → the service/booking, not the vehicle).
+- CONTEXT HINTS: the input may include parenthetical or trailing context about where/how it was heard
+  ("(kid's teacher said this at pickup)", "— heard at bedtime", "this was shouted by a 3-year-old").
+  USE that context to pick the right sense and register, but NEVER translate or mention the context itself.
 - If the English is ambiguous or has other common senses, list 2-3 "alternatives" (most likely first)
   covering those other senses. EACH alternative is its own {"casual":…,"formal":…} pair under the same rules.
   Empty/omit alternatives when unambiguous.
