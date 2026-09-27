@@ -1,5 +1,6 @@
 import { LlmTranslateSchema, type CardVariant } from "../shared/api";
 import { marksToNumbered, numberedToBpmf, numberedToMarks } from "../shared/bpmf";
+import { normalizeBoxes, parseImageDims } from "./imageinfo";
 import type { ChatClient, ChatMessage, ChatOptions, Result, TranslationService, TtsService, SttService, OcrService, OcrLine } from "./ports";
 
 const isHan = (ch: string): boolean => /\p{Script=Han}/u.test(ch);
@@ -295,7 +296,9 @@ export class GatewayOcrService implements OcrService {
   available(): boolean { return true; }
   async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
     try {
-      const b64 = Buffer.from(await image.arrayBuffer()).toString("base64");
+      const bytes = new Uint8Array(await image.arrayBuffer());
+      const b64 = Buffer.from(bytes).toString("base64");
+      const dims = parseImageDims(bytes);
       const res = await fetch(`${this.cfg.base}/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
@@ -307,12 +310,14 @@ export class GatewayOcrService implements OcrService {
             {
               role: "system",
               content:
-                'You are an OCR engine for photos of Chinese text (Taiwan children\'s books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2]}]} where box is the tight absolute-pixel bounding box of that line of text in the provided image (x1<x2, y1<y2). Omit box if unsure — never invent coordinates.',
+                `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2]}]}. ${
+                  dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
+                }box uses ABSOLUTE PIXEL coordinates in that image (top-left origin; 0 ≤ x1 < x2 ≤ image width; 0 ≤ y1 < y2 ≤ image height). Never 0-1000 normalized coordinates. Box ONLY the Han characters, not adjacent zhuyin. Omit box if unsure — never invent coordinates.`,
             },
             {
               role: "user",
               content: [
-                { type: "text", text: "Transcribe the Chinese text with bounding boxes." },
+                { type: "text", text: "Transcribe the Chinese text with absolute-pixel bounding boxes." },
                 { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
               ],
             },
@@ -336,7 +341,10 @@ export class GatewayOcrService implements OcrService {
               : undefined;
           lines.push({ text: it.text.trim(), box });
         }
-        if (lines.length) return { ok: true, value: { lines } };
+        if (lines.length) {
+          const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
+          return { ok: true, value: { lines: healed } };
+        }
       }
       // fallback: plain-text lines, no boxes
       const plain = raw
