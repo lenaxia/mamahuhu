@@ -103,12 +103,16 @@ Return ONLY valid JSON, no prose, matching exactly:
  "formal":{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"},
  "alternatives":[{"casual":{…},"formal":{…}}],"understood":"…"}
 Rules:
-- META-QUESTIONS: the input may be a QUESTION ABOUT Mandarin rather than a phrase to
-  translate ("how do you say airplane", "what do kids say to elders at Chinese New Year",
-  "what's the word for grandma"). Extract the phrase/situation the user actually means,
-  set "understood" to it in a few English words, and translate THAT in the normal fields.
-  For situation questions, give the natural expressions Taiwanese speakers would actually
-  use. For direct phrases, omit "understood".
+- "understood" is REQUIRED in the JSON: empty string "" for a direct phrase. If the input
+  is a QUESTION ABOUT Mandarin (meta-question), fill it with the phrase/situation the user
+  actually means, in a few English words — then translate THAT in the normal fields.
+  NEVER translate the question itself.
+  Examples:
+  "how do you say airplane?" → understood "airplane", casual/formal = 飛機
+  "what's the word for grandma?" → understood "grandma (maternal)", fields = 外婆/阿嬤 as senses
+  "what do kids say to elders at Chinese New Year?" → understood "New Year greeting kids say to elders",
+    fields = the greetings Taiwanese kids actually use (恭喜發財！ etc.)
+  Direct phrase "time for a bath" → understood "", fields = 該洗澡了.
 - Translate MEANING AND INTENT, never word-for-word. Ask: what would a Taiwanese speaker
   actually say here? If the literal rendering sounds foreign or awkward in Mandarin,
   discard it and use the natural equivalent.
@@ -129,7 +133,7 @@ Rules:
 export class LlmTranslationService implements TranslationService {
   constructor(private chat: ChatClient, private model: string) {}
 
-  async translate(text: string, opts?: { audience?: string }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[] }>> {
+  async translate(text: string, opts?: { audience?: string }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
     const messages: ChatMessage[] = [
       { role: "system", content: TRANSLATE_SYSTEM },
       {
@@ -159,7 +163,7 @@ export class LlmTranslationService implements TranslationService {
           })
           .filter((a): a is { casual: CardVariant; formal: CardVariant } => a !== null)
           .slice(0, 3);
-        return { ok: true, value: { casual, formal, alternatives } };
+        return { ok: true, value: { casual, formal, alternatives, understood: parsed.data.understood || undefined } };
       }
       messages.push({ role: "assistant", content: raw.slice(0, 2000) });
       messages.push({ role: "user", content: "That did not match the JSON schema. Return ONLY the corrected JSON object." });
@@ -234,6 +238,23 @@ export class MockTranslationService implements TranslationService {
           formal: completeVariant({
             traditional: "飛機", simplified: "飞机", pinyin: "fēi jī",
             gloss: "airplane", note: "mock meta fixture",
+          }),
+        },
+      };
+    }
+    if (t.includes("new year") && t.includes("greeting")) {
+      return {
+        ok: true,
+        value: {
+          understood: "New Year greeting kids say to elders",
+          alternatives: [],
+          casual: completeVariant({
+            traditional: "恭喜發財！", simplified: "恭喜发财！", pinyin: "gōng xǐ fā cái",
+            gloss: "Wishing you prosperity! (the classic kids' greeting)", note: "kids expect a red packet after this",
+          }),
+          formal: completeVariant({
+            traditional: "祝您新年快樂", simplified: "祝您新年快乐", pinyin: "zhù nín xīn nián kuài lè",
+            gloss: "Wishing you a happy New Year", note: "polite, to elders",
           }),
         },
       };

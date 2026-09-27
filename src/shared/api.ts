@@ -125,8 +125,8 @@ export const LlmTranslateSchema = z.object({
     )
     .max(3)
     .optional(),
-  /** for meta-questions: the extracted phrase/situation the user actually means */
-  understood: z.string().optional(),
+  /** for meta-questions: the extracted phrase/situation the user actually means; "" otherwise */
+  understood: z.string().default(""),
 });
 export type LlmTranslate = z.infer<typeof LlmTranslateSchema>;
 

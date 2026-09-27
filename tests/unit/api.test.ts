@@ -488,3 +488,16 @@ describe("meta-questions", () => {
     expect(card.casual.pinyin).toBe("fēi jī");
   });
 });
+
+describe("meta-questions (situation type)", () => {
+  it("extracts the situation and provides the greeting", async () => {
+    const res = await app.request("/api/ask/translate", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "what is the typical greeting for kids on chinese new year to elders?" }),
+    });
+    const card = await res.json();
+    expect(card.understood).toBe("New Year greeting kids say to elders");
+    expect(card.casual.traditional).toContain("恭喜發財");
+  });
+});
