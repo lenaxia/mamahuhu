@@ -242,7 +242,7 @@ describe("proxy-auth mode", () => {
     try {
       const tmp = "./data/test-proxy.db";
       rmSync(tmp, { force: true });
-      const proxyApp = (await makeApp({ sqlitePath: tmp })).app;
+      const proxyApp = (await makeApp({ sqlitePath: tmp, llmMock: true })).app;
       const res = await proxyApp.request("/api/me", { headers: { "x-remote-user": "hk.wife@fam.io", "x-remote-name": "Mama" } });
       const me = await res.json();
       expect(me.name).toBe("Mama");
@@ -294,7 +294,7 @@ describe("tts mode selection", () => {
     try {
       const tmp = "./data/test-tts.db";
       rmSync(tmp, { force: true });
-      const a = (await makeApp({ sqlitePath: tmp })).app;
+      const a = (await makeApp({ sqlitePath: tmp, llmMock: true })).app;
       const s = await (await a.request("/api/tts/status")).json();
       expect(s).toEqual({ available: false, mode: "browser" });
     } finally {
@@ -413,7 +413,7 @@ describe("DATA_DIR storage root", () => {
       const tmp = "./data/test-datadir.db";
       rmSync(tmp, { force: true });
       rmSync("./data-test", { recursive: true, force: true });
-      const a = (await makeApp({ sqlitePath: tmp })).app;
+      const a = (await makeApp({ sqlitePath: tmp, llmMock: true })).app;
       const sharp = (await import("sharp")).default;
       const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer();
       const form = new FormData();
