@@ -58,8 +58,9 @@ export function AskScreen(): React.JSX.Element {
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
   const [ocrBusy, setOcrBusy] = useState(false);
   const [photo, setPhoto] = useState<{ url: string; w: number; h: number } | null>(null);
-  const [sttLang, setSttLang] = useState<"zh-TW" | "en-US">("zh-TW");
+  const [sttLang, setSttLang] = useState<"auto">("auto"); // detected language display
   const [listening, setListening] = useState(false);
+  const [detectedLang, setDetectedLang] = useState<string>("");
   const [interim, setInterim] = useState("");
   const [spokenText, setSpokenText] = useState<string | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
@@ -187,8 +188,8 @@ export function AskScreen(): React.JSX.Element {
     const r = new BrowserRecognizer();
     recognizer.current = r;
     setListening(true);
-    r.start(
-      sttLang,
+    setDetectedLang("");
+    r.startAuto(
       (t) => setInterim(t),
       (finalText) => {
         setListening(false);
@@ -202,12 +203,17 @@ export function AskScreen(): React.JSX.Element {
         setListening(false);
         setError(m);
       },
+      (lang) => setDetectedLang(lang),
     );
   }
 
   async function submitSpoken(t: string): Promise<void> {
     setError(null);
-    if (/\p{Script=Han}/u.test(t)) {
+    const han = /\p{Script=Han}/u.test(t);
+    const latin = /[A-Za-z]{2,}/.test(t);
+    // mixed scripts (e.g. "what is 吃飯?") go to the translator — it handles
+    // meta-questions and mixed language; pure hanzi goes to the word pipeline
+    if (han && !latin) {
       setBusy("lookup");
       try {
         setHanziWords(await api.hanzi(t));
@@ -237,14 +243,6 @@ export function AskScreen(): React.JSX.Element {
 
       {mode === "speak" && (
         <div className="space-y-4">
-          <Segmented<"zh-TW" | "en-US">
-            value={sttLang}
-            onChange={setSttLang}
-            options={[
-              { value: "zh-TW", label: "中文" },
-              { value: "en-US", label: "English" },
-            ]}
-          />
           <div className="flex flex-col items-center gap-3 py-6">
             <button
               aria-label={listening ? "Stop" : "Record"}
@@ -256,7 +254,15 @@ export function AskScreen(): React.JSX.Element {
               <IconMic className="h-10 w-10" />
             </button>
             <p className="text-sm text-neutral-400">
-              {sttBusy ? "Transcribing…" : listening ? "listening… tap to stop" : sttServerMode() ? "tap to record" : browserSttSupported() ? "tap and speak" : "not supported in this browser"}
+              {sttBusy
+                ? "Transcribing…"
+                : listening
+                  ? `listening${detectedLang ? ` (${detectedLang === "zh-TW" ? "中文" : "English"})` : ""}… tap to stop`
+                  : sttServerMode()
+                    ? "tap to record — any language"
+                    : browserSttSupported()
+                      ? "tap and speak — language is detected automatically"
+                      : "not supported in this browser"}
             </p>
             {interim && <p className="hanzi text-lg">{interim}</p>}
           </div>

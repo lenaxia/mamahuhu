@@ -26,26 +26,44 @@ export function browserSttSupported(): boolean {
   return Recognition() !== null;
 }
 
-/** Live browser recognizer: emits interim + final transcript. */
+export type SttLang = "zh-TW" | "en-US";
+
+/** Live browser recognizer with auto language detection: starts zh-TW, flips to
+ *  en-US on Latin interim text (or after 3s of silence), once per session. */
 export class BrowserRecognizer {
   private rec: any = null;
+  private switched = false;
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private cbs: { onInterim: (t: string) => void; onFinal: (t: string) => void; onError: (m: string) => void; onLang: (l: SttLang) => void } | null = null;
 
-  start(
-    lang: "zh-TW" | "en-US",
+  startAuto(
     onInterim: (text: string) => void,
     onFinal: (text: string) => void,
     onError: (msg: string) => void,
+    onLang?: (lang: SttLang) => void,
   ): void {
+    this.switched = false;
+    this.cbs = { onInterim, onFinal, onError, onLang: onLang ?? (() => {}) };
+    this.spinUp("zh-TW");
+    // no interim after 3s → maybe they're speaking English into a zh recognizer
+    this.silenceTimer = setTimeout(() => this.trySwitch("en-US"), 3000);
+  }
+
+  private spinUp(lang: SttLang): void {
     const R = Recognition();
     if (!R) {
-      onError("Speech recognition is not supported in this browser");
+      this.cbs?.onError("Speech recognition is not supported in this browser");
       return;
     }
-    this.rec = new R();
-    this.rec.lang = lang;
-    this.rec.interimResults = true;
-    this.rec.continuous = false;
-    this.rec.onresult = (e: any) => {
+    try {
+      this.rec?.abort();
+    } catch { /* noop */ }
+    const rec = new R();
+    this.rec = rec;
+    rec.lang = lang;
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.onresult = (e: any) => {
       let interim = "";
       let final = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -53,17 +71,41 @@ export class BrowserRecognizer {
         if (r.isFinal) final += r[0].transcript;
         else interim += r[0].transcript;
       }
-      if (interim) onInterim(interim);
-      if (final) onFinal(final.trim());
+      if (interim) {
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+        // Latin words while listening as zh → they're speaking English
+        if (!this.switched && lang === "zh-TW" && /[A-Za-z]{2,}/.test(interim)) {
+          this.trySwitch("en-US");
+          return;
+        }
+        this.cbs?.onInterim(interim);
+      }
+      if (final) {
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+        this.cbs?.onFinal(final.trim());
+      }
     };
-    this.rec.onerror = (e: any) => onError(e?.error === "not-allowed" ? "Microphone permission denied" : `Recognition error: ${e?.error ?? "unknown"}`);
-    this.rec.onend = () => {
-      /* final callback handles completion */
+    rec.onerror = (e: any) => {
+      const err = e?.error ?? "unknown";
+      if (err === "no-speech" && !this.switched) {
+        this.trySwitch("en-US"); // zh recognizer heard nothing — try English once
+        return;
+      }
+      this.cbs?.onError(err === "not-allowed" ? "Microphone permission denied" : `Recognition error: ${err}`);
     };
-    this.rec.start();
+    rec.start();
+    this.cbs?.onLang(lang);
+  }
+
+  private trySwitch(lang: SttLang): void {
+    if (this.switched) return;
+    this.switched = true;
+    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+    this.spinUp(lang);
   }
 
   stop(): void {
+    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
     try {
       this.rec?.stop();
     } catch {
