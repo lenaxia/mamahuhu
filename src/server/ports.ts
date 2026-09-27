@@ -67,7 +67,7 @@ export interface SttService {
   transcribe(audio: Blob, opts?: { language?: "zh" | "en" | "auto" }): Promise<Result<{ text: string; language: string }>>;
 }
 
-export type OcrLine = { text: string; box?: [number, number, number, number] };
+export type OcrLine = { text: string; box?: [number, number, number, number]; dir?: "h" | "v" };
 
 /** Subject identification for textless photos → ranked Mandarin name tags for everything visible. */
 export interface DescribeTag {

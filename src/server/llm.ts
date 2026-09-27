@@ -412,7 +412,7 @@ export class GatewayOcrService implements OcrService {
       const b64 = Buffer.from(bytes).toString("base64");
       const dims = parseImageDims(bytes);
       const system =
-        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2]}]}. ${
+        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style). ${
           dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
         }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.`;
       const user = [
@@ -445,7 +445,7 @@ export class GatewayOcrService implements OcrService {
         if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
 
         const lines: OcrLine[] = [];
-        const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown }[] } | null;
+        const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
         if (parsed?.items?.length) {
           for (const it of parsed.items) {
             if (typeof it.text !== "string" || !it.text.trim()) continue;
@@ -454,7 +454,8 @@ export class GatewayOcrService implements OcrService {
               b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
                 ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
                 : undefined;
-            lines.push({ text: it.text.trim(), box });
+            const dir = it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined;
+            lines.push({ text: it.text.trim(), box, dir });
           }
           if (lines.length) {
             const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
@@ -616,7 +617,11 @@ export class MockOcrService implements OcrService {
     // mock convention: uploads named plant*/blank* are textless (subject photos)
     const name = (image as File).name ?? "";
     if (/plant|blank|textless/i.test(name)) return { ok: true, value: { lines: [] } };
-    return { ok: true, value: { lines: [{ text: "小貓在睡覺", box: [20, 30, 560, 110] }] } };
+    // vertical: uploads named vertical* contain a top-to-bottom column
+    if (/vertical/i.test(name)) {
+      return { ok: true, value: { lines: [{ text: "親近自然", box: [880, 100, 950, 420], dir: "v" }] } };
+    }
+    return { ok: true, value: { lines: [{ text: "小貓在睡覺", box: [20, 30, 560, 110], dir: "h" }] } };
   }
 }
 

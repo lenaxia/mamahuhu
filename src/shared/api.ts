@@ -182,6 +182,8 @@ export const OcrWordSchema = RenderedWordSchema.extend({
   saved: z.boolean(),
   /** absolute pixel box on the UPLOADED image (x1,y1,x2,y2); absent in fallback mode */
   box: BoxSchema.optional(),
+  /** reading direction from the model: h = horizontal line, v = vertical column */
+  dir: z.enum(["h", "v"]).optional(),
 });
 export const IdentifySchema = z.object({
   traditional: z.string(),

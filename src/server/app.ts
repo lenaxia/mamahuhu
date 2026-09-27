@@ -481,24 +481,32 @@ async function buildPhrase(
       const segments = segmentHanzi(line.text);
       const totalChars = segments.reduce((s, seg) => s + [...seg].length, 0) || 1;
       let xCursor = line.box?.[0];
+      let yCursor = line.box?.[1];
       for (const seg of segments) {
         const hit = lookup(seg);
         const segLen = [...seg].length;
         let box: [number, number, number, number] | undefined;
-        if (line.box && xCursor !== undefined) {
-          const w = ((line.box[2] - line.box[0]) * segLen) / totalChars;
-          box = [Math.round(xCursor), line.box[1], Math.round(xCursor + w), line.box[3]];
-          xCursor += w;
-          positioned = true;
+        if (line.box) {
+          if (line.dir === "v" && yCursor !== undefined) {
+            // vertical column: split the line box along Y by char count
+            const hStep = ((line.box[3] - line.box[1]) * segLen) / totalChars;
+            box = [line.box[0], Math.round(yCursor), line.box[2], Math.round(yCursor + hStep)];
+            yCursor += hStep;
+          } else if (xCursor !== undefined) {
+            const w = ((line.box[2] - line.box[0]) * segLen) / totalChars;
+            box = [Math.round(xCursor), line.box[1], Math.round(xCursor + w), line.box[3]];
+            xCursor += w;
+          }
+          if (box) positioned = true;
         }
         if (hit) {
-          words.push({ ...hit, known: true, saved: savedSet.has(seg), box });
+          words.push({ ...hit, known: true, saved: savedSet.has(seg), box, dir: line.dir });
           continue;
         }
         for (const ch of [...seg]) {
           const charHit = lookup(ch);
-          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch) });
-          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false });
+          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(ch), dir: line.dir });
+          else words.push({ traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, dir: line.dir });
         }
       }
       if (words.length) lines.push({ words });

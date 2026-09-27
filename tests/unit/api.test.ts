@@ -619,3 +619,20 @@ describe("follow-up Q&A and always-on tags", () => {
     expect((await withPhoto.json()).answer.toLowerCase()).toContain("banyan");
   });
 });
+
+describe("vertical text direction", () => {
+  it("dir=v lines split boxes along Y and words carry dir", async () => {
+    const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 64, height: 128, channels: 3, background: { r: 240, g: 240, b: 240 } } }).png().toBuffer();
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "vertical.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    const body = await res.json();
+    const ws = body.lines[0].words;
+    expect(body.positioned).toBe(true);
+    expect(ws.every((w: { dir?: string }) => w.dir === "v")).toBe(true);
+    // two words 親近 + 自然 → stacked along y within [100..420]
+    expect(ws[1].box[1]).toBeGreaterThan(ws[0].box[1]);
+    expect(ws[0].box[2] - ws[0].box[0]).toBeGreaterThan(0);
+  });
+});
