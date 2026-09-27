@@ -180,21 +180,29 @@ export function PhotoPage({
                   const isSaved = wd.saved || savedNow.has(wd.traditional);
                   const boxH = (y2 - y1) * imgScale;
                   const boxW = (x2 - x1) * imgScale;
-                  const chars = [...wd.traditional].length || 1;
-                  const fontSize = Math.max(10, Math.min(boxH * 0.78, boxW / (chars * 1.2), 40));
+                  const chars = [...wd.traditional];
+                  const n = chars.length || 1;
+                  // direction from the model; aspect fallback when absent.
+                  // text must FIT the box: tall boxes stack chars vertically.
+                  const tall = wd.dir === "v" || (wd.dir !== "h" && boxH > boxW * 1.25 && n > 1);
+                  const fontSize = tall
+                    ? Math.max(9, Math.min(boxW * 0.85, (boxH / n) * 0.9, 40))
+                    : Math.max(10, Math.min(boxH * 0.78, boxW / (n * 1.2), 40));
                   return (
                     <button
                       key={`${li}-${wi}`}
                       data-ocr-word={wd.traditional}
                       onClick={() => setOcrWord(ocrWord?.traditional === wd.traditional ? null : wd)}
                       style={{ left: x1 * imgScale, top: y1 * imgScale, width: boxW, height: boxH, fontSize, lineHeight: 1.1 }}
-                      className={`hanzi absolute flex items-center justify-center overflow-hidden rounded-md border px-0.5 ${
+                      className={`hanzi absolute flex ${tall ? "flex-col" : "flex-row"} items-center justify-center overflow-hidden rounded-md border px-0.5 ${
                         ocrWord?.traditional === wd.traditional
                           ? "border-amber-500 bg-amber-500/40 text-amber-900 dark:text-amber-100"
                           : "border-white/70 bg-white/70 text-neutral-900 backdrop-blur-[1px] dark:bg-black/50 dark:text-white"
                       } ${wd.known ? "" : "opacity-50"}`}
                     >
-                      {wd.traditional}
+                      {chars.map((ch, ci) => (
+                        <span key={ci}>{ch}</span>
+                      ))}
                       {isSaved && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />}
                     </button>
                   );
