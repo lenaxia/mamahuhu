@@ -374,6 +374,8 @@ export function AskScreen(): React.JSX.Element {
           {spokenConfidence !== null && spokenConfidence < 0.7 && (
             <span className="ml-2 text-amber-600 dark:text-amber-400">low confidence — maybe retry &amp; enunciate</span>
           )}
+        </div>
+      )}
 
       {translateCard && <ResultCard card={translateCard} />}
 
@@ -399,9 +401,6 @@ export function AskScreen(): React.JSX.Element {
             ))}
           {sttResult.route === "translate" && sttResult.translate && <ResultCard card={sttResult.translate} />}
           {sttResult.route === "text" && <p className="text-sm text-neutral-400">transcript only — no translation available</p>}
-        </div>
-      )}
-
         </div>
       )}
 
@@ -446,7 +445,6 @@ export function AskScreen(): React.JSX.Element {
           {selectedCand && <CandidateCard word={selectedCand} />}
         </div>
       )}
-
     </div>
   );
 }
