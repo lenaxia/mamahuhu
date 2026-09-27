@@ -101,8 +101,14 @@ const TRANSLATE_SYSTEM = `You translate English into natural, Taiwan-style Tradi
 Return ONLY valid JSON, no prose, matching exactly:
 {"casual":{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"},
  "formal":{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"},
- "alternatives":[{"casual":{…},"formal":{…}}]}
+ "alternatives":[{"casual":{…},"formal":{…}}],"understood":"…"}
 Rules:
+- META-QUESTIONS: the input may be a QUESTION ABOUT Mandarin rather than a phrase to
+  translate ("how do you say airplane", "what do kids say to elders at Chinese New Year",
+  "what's the word for grandma"). Extract the phrase/situation the user actually means,
+  set "understood" to it in a few English words, and translate THAT in the normal fields.
+  For situation questions, give the natural expressions Taiwanese speakers would actually
+  use. For direct phrases, omit "understood".
 - Translate MEANING AND INTENT, never word-for-word. Ask: what would a Taiwanese speaker
   actually say here? If the literal rendering sounds foreign or awkward in Mandarin,
   discard it and use the natural equivalent.
@@ -176,7 +182,7 @@ export class LlmTranslationService implements TranslationService {
 }
 
 export class MockTranslationService implements TranslationService {
-  async translate(text: string): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[] }>> {
+  async translate(text: string): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
     const t = text.toLowerCase();
     if (t.includes("flight") || t.includes("airline")) {
       return {
@@ -212,6 +218,23 @@ export class MockTranslationService implements TranslationService {
               }),
             },
           ],
+        },
+      };
+    }
+    if (t.includes("how do you say") && t.includes("airplane")) {
+      return {
+        ok: true,
+        value: {
+          understood: "airplane",
+          alternatives: [],
+          casual: completeVariant({
+            traditional: "飛機", simplified: "飞机", pinyin: "fēi jī",
+            gloss: "airplane", note: "mock meta fixture",
+          }),
+          formal: completeVariant({
+            traditional: "飛機", simplified: "飞机", pinyin: "fēi jī",
+            gloss: "airplane", note: "mock meta fixture",
+          }),
         },
       };
     }

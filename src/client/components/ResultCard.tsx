@@ -55,6 +55,9 @@ export function ResultCard({ card }: { card: TranslateRes }) {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-neutral-400">“{card.source}”</div>
+          {card.understood && (
+            <div className="text-[11px] text-amber-600 dark:text-amber-400">→ asking for: {card.understood}</div>
+          )}
           {card.lowConfidence && (
             <div className="text-[11px] text-amber-600 dark:text-amber-400">check annotations</div>
           )}

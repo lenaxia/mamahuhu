@@ -68,6 +68,7 @@ export type TranslateReq = z.infer<typeof TranslateReqSchema>;
 
 export const TranslateResSchema = z.object({
   source: z.string(),
+  understood: z.string().optional(),
   register: RegisterSchema,
   casual: CardVariantSchema.optional(),
   formal: CardVariantSchema.optional(),
@@ -124,6 +125,8 @@ export const LlmTranslateSchema = z.object({
     )
     .max(3)
     .optional(),
+  /** for meta-questions: the extracted phrase/situation the user actually means */
+  understood: z.string().optional(),
 });
 export type LlmTranslate = z.infer<typeof LlmTranslateSchema>;
 

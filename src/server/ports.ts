@@ -38,9 +38,17 @@ export interface TranslateOptions {
   audience?: string;
 }
 
+export interface TranslateOutcome {
+  casual: CardVariant;
+  formal: CardVariant;
+  alternatives: AltSense[];
+  /** for meta-questions: the extracted phrase/situation the user actually means */
+  understood?: string;
+}
+
 /** EN → ZH translation with both registers + alternative senses (each with registers). Deterministic under mock. */
 export interface TranslationService {
-  translate(text: string, opts?: TranslateOptions): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: AltSense[] }>>;
+  translate(text: string, opts?: TranslateOptions): Promise<Result<TranslateOutcome>>;
   /** natural one-line English gloss of a Mandarin phrase (zh→en) */
   glossZh(text: string): Promise<Result<string>>;
 }

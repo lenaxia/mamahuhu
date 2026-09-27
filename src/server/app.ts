@@ -302,6 +302,7 @@ async function buildPhrase(
       .map(({ casual, formal }) => ({ casual, formal }));
     const payload = TranslateResSchema.parse({
       source: parsed.data.text,
+      understood: res.value.understood,
       register: "casual",
       casual: res.value.casual,
       formal: res.value.formal,

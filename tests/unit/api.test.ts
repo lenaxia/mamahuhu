@@ -474,3 +474,17 @@ describe("phrase card", () => {
     expect(body.phrase).toBeUndefined();
   });
 });
+
+describe("meta-questions", () => {
+  it("'how do you say X' extracts intent and translates X", async () => {
+    const res = await app.request("/api/ask/translate", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "how do you say airplane?" }),
+    });
+    const card = await res.json();
+    expect(card.understood).toBe("airplane");
+    expect(card.casual.traditional).toBe("飛機");
+    expect(card.casual.pinyin).toBe("fēi jī");
+  });
+});
