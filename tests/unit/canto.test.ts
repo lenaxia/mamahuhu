@@ -158,17 +158,28 @@ describe("tts variety surface", () => {
 });
 
 describe("zh-HK follow-ups", () => {
-  it("answers as a 口語/書面 pair", async () => {
+  it("answers a Chinese question as a 口語/書面 pair", async () => {
     const res = await app.request("/api/ask/followup", {
       method: "POST",
       headers: H,
-      body: JSON.stringify({ question: "when would I say this?", hanzi: "沖涼喇", variety: "zh-HK" }),
+      body: JSON.stringify({ question: "咩時候用呢個？", hanzi: "沖涼喇", variety: "zh-HK" }),
     });
     expect(res.status).toBe(200);
     const j = await res.json();
     expect(j.variety).toBe("zh-HK");
     expect(j.answer).toContain("口語"); // spoken-canto mock fixture
     expect(j.answerWritten).toContain("書面");
+  });
+
+  it("answers an English question in English (single answer)", async () => {
+    const res = await app.request("/api/ask/followup", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ question: "when would I say this?", hanzi: "沖涼喇", variety: "zh-HK" }),
+    });
+    const j = await res.json();
+    expect(j.answer).toMatch(/Mock English/);
+    expect(j.answerWritten).toBeUndefined();
   });
 
   it("zh-Hant follow-ups stay single-answer", async () => {

@@ -659,13 +659,25 @@ export class MockTaggingService implements TaggingService {
 const FOLLOWUP_SYSTEM_MANDARIN =
   "Answer a Mandarin learner's follow-up question about a vocabulary item or photo. Plain text, under 80 words. Include hanzi + pinyin for any Mandarin terms you introduce. If a photo is provided, look at it again before answering.";
 
-const FOLLOWUP_SYSTEM_CANTO = `Answer a Hong Kong Cantonese user's follow-up question about 口語 vocabulary or a photo.
+/** A question is "Chinese" when Han characters dominate it — questions about
+ *  canto phrases often embed a word or two of hanzi ("instead of 晚安?") while
+ *  still being English questions. */
+function questionIsChinese(q: string): boolean {
+  const han = [...q].filter((c) => /\p{Script=Han}/u.test(c)).length;
+  const latin = (q.match(/[A-Za-z]/g) ?? []).length;
+  return han > 0 && han >= latin;
+}
+
+const FOLLOWUP_SYSTEM_CANTO_ZH = `Answer a Hong Kong Cantonese user's follow-up question (asked in Chinese) about 口語 vocabulary or a photo.
 Return ONLY valid JSON, no prose: {"spoken":"…","written":"…"}
 - "spoken": the answer in COLLOQUIAL SPOKEN Cantonese (口語) with Hong Kong characters — native
   wording (唔/嘅/咗/喺/佢/哋), never Mandarin calques (是/的/什麼/現在), under 60 words.
 - "written": the same content in standard written Chinese (書面語), no Cantonese-specific characters.
 - NO romanization anywhere (readings are provided by the app's dictionary, never you).
 - If a photo is provided, look at it again before answering.`;
+
+const FOLLOWUP_SYSTEM_CANTO_EN =
+  "Answer a Hong Kong Cantonese learner's follow-up question, IN ENGLISH, about vocabulary or a photo. Plain text, under 80 words. Include Traditional Hong Kong-style hanzi for any Cantonese terms you introduce — but NO romanization (the app provides readings). If a photo is provided, look at it again before answering.";
 
 export class LlmFollowUpService implements FollowUpService {
   constructor(private cfg: { base: string; key: string; model: string }) {}
@@ -685,7 +697,13 @@ export class LlmFollowUpService implements FollowUpService {
           temperature: 0.3,
           max_tokens: 400,
           messages: [
-            { role: "system", content: input.variety === "zh-HK" ? FOLLOWUP_SYSTEM_CANTO : FOLLOWUP_SYSTEM_MANDARIN },
+            {
+              role: "system",
+              // answer in the language of the question: Han → 口語/書面 pair, English → English
+              content: input.variety === "zh-HK"
+                ? (questionIsChinese(input.question) ? FOLLOWUP_SYSTEM_CANTO_ZH : FOLLOWUP_SYSTEM_CANTO_EN)
+                : FOLLOWUP_SYSTEM_MANDARIN,
+            },
             { role: "user", content },
           ],
         }),
@@ -694,7 +712,7 @@ export class LlmFollowUpService implements FollowUpService {
       const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
       const raw = data.choices?.[0]?.message?.content?.trim();
       if (!raw) return { ok: false, error: "empty answer" };
-      if (input.variety === "zh-HK") {
+      if (input.variety === "zh-HK" && questionIsChinese(input.question)) {
         const parsed = z.object({ spoken: z.string().min(1), written: z.string().min(1) }).safeParse(extractJson(raw));
         if (!parsed.success) return { ok: false, error: "followup model returned unusable JSON" };
         return { ok: true, value: { answer: parsed.data.spoken, answerWritten: parsed.data.written } };
@@ -709,7 +727,11 @@ export class LlmFollowUpService implements FollowUpService {
 export class MockFollowUpService implements FollowUpService {
   async ask(input: { question: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ answer: string; answerWritten?: string }>> {
     if (input.variety === "zh-HK") {
-      return { ok: true, value: { answer: "你好叻呀！mock 口語 answer", answerWritten: "你很棒！mock 書面 answer" } };
+      // language follows the question: Han → 口語/書面 pair, English → English
+      if (questionIsChinese(input.question)) {
+        return { ok: true, value: { answer: "你好叻呀！mock 口語 answer", answerWritten: "你很棒！mock 書面 answer" } };
+      }
+      return { ok: true, value: { answer: "Mock English answer — 早唞 is the bedtime parting." } };
     }
     if (/tree|樹/i.test(input.question)) {
       return { ok: true, value: { answer: "It looks like a banyan tree — 榕樹 (róng shù), the classic shade tree in Taiwanese parks." } };

@@ -151,7 +151,7 @@ export function FollowUpBox({ hanzi, gloss, askId, variety = "zh-Hant" }: { hanz
     <div className="space-y-1.5">
       {answer && (
         <div className="rounded-xl bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 space-y-1.5">
-          {variety === "zh-HK" ? (
+          {variety === "zh-HK" && answer.answerWritten ? (
             <>
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 shrink-0 rounded bg-sky-100 dark:bg-sky-900/60 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">口語</span>
