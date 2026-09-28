@@ -50,9 +50,14 @@ function variantValid(v: CardVariant, variety?: "zh-Hant" | "zh-HK"): boolean {
 /** Pulls the first balanced JSON object out of LLM text (handles code fences). */
 export function extractJson(text: string): unknown {
   const stripped = text.replace(/```(?:json)?/gi, "").replace(/```/g, "");
-  const start = stripped.indexOf("{");
-  if (start < 0) return null;
-  let depth = 0;
+  // first STRUCTURE start — an object or a top-level array (the tagger
+  // returns `["airport", …]`, which contains no `{` anywhere)
+  const objStart = stripped.indexOf("{");
+  const arrStart = stripped.indexOf("[");
+  if (objStart < 0 && arrStart < 0) return null;
+  const start = objStart < 0 ? arrStart : arrStart < 0 ? objStart : Math.min(objStart, arrStart);
+  const pairs: Record<string, string> = { "{": "}", "[": "]" };
+  const stack: string[] = [];
   let inStr = false;
   let esc = false;
   for (let i = start; i < stripped.length; i++) {
@@ -61,10 +66,10 @@ export function extractJson(text: string): unknown {
     if (ch === "\\") { esc = true; continue; }
     if (ch === '"') { inStr = !inStr; continue; }
     if (inStr) continue;
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) {
+    if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      const open = stack.pop();
+      if (open !== undefined && pairs[open] === ch && stack.length === 0) {
         try {
           return JSON.parse(stripped.slice(start, i + 1));
         } catch {
