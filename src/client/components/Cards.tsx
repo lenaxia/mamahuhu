@@ -128,20 +128,20 @@ export function CandidateCard({ word }: { word: RenderedWord }) {
 }
 
 /** Inline follow-up Q&A about the card above it. */
-export function FollowUpBox({ hanzi, gloss, askId }: { hanzi?: string; gloss?: string; askId?: string }): React.JSX.Element {
+export function FollowUpBox({ hanzi, gloss, askId, variety = "zh-Hant" }: { hanzi?: string; gloss?: string; askId?: string; variety?: "zh-Hant" | "zh-HK" }): React.JSX.Element {
   const [q, setQ] = useState("");
-  const [answer, setAnswer] = useState<string | null>(null);
+  const [answer, setAnswer] = useState<{ answer: string; answerWritten?: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function ask(): Promise<void> {
     if (!q.trim() || busy) return;
     setBusy(true);
     try {
-      const res = await api.followUp({ question: q.trim(), hanzi, gloss, ...(askId ? { askId } : {}) });
-      setAnswer(res.answer);
+      const res = await api.followUp({ question: q.trim(), hanzi, gloss, ...(askId ? { askId } : {}), variety });
+      setAnswer({ answer: res.answer, answerWritten: res.answerWritten });
       setQ("");
     } catch {
-      setAnswer("Couldn't answer that — try again.");
+      setAnswer({ answer: "Couldn't answer that — try again." });
     } finally {
       setBusy(false);
     }
@@ -150,8 +150,25 @@ export function FollowUpBox({ hanzi, gloss, askId }: { hanzi?: string; gloss?: s
   return (
     <div className="space-y-1.5">
       {answer && (
-        <div className="rounded-xl bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300">
-          {answer}
+        <div className="rounded-xl bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 space-y-1.5">
+          {variety === "zh-HK" ? (
+            <>
+              <div className="flex items-start gap-2">
+                <span className="mt-0.5 shrink-0 rounded bg-sky-100 dark:bg-sky-900/60 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">口語</span>
+                <p className="min-w-0 flex-1" lang="zh-HK">{answer.answer}</p>
+                <button aria-label="Play spoken answer" onClick={() => speak(answer.answer, { variety: "zh-HK" })} className="mt-0.5 shrink-0 text-neutral-400 active:text-neutral-600">▶</button>
+              </div>
+              {answer.answerWritten && (
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0 rounded bg-neutral-200 dark:bg-neutral-700 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:text-neutral-300">書面</span>
+                  <p className="min-w-0 flex-1">{answer.answerWritten}</p>
+                  <button aria-label="Play written answer" onClick={() => speak(answer.answerWritten ?? "", { variety: "zh-HK" })} className="mt-0.5 shrink-0 text-neutral-400 active:text-neutral-600">▶</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <p>{answer.answer}</p>
+          )}
         </div>
       )}
       <div className="flex gap-1.5">
@@ -159,7 +176,7 @@ export function FollowUpBox({ hanzi, gloss, askId }: { hanzi?: string; gloss?: s
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void ask()}
-          placeholder="ask more…"
+          placeholder={variety === "zh-HK" ? "問多啲… (ask more)" : "ask more…"}
           className="min-w-0 flex-1 rounded-full border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-amber-500"
         />
         <button

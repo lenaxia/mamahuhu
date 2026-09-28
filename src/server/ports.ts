@@ -100,9 +100,10 @@ export interface TaggingService {
   tagsFor(input: { traditional: string; english: string }): Promise<Result<string[]>>;
 }
 
-/** Conversational follow-up about a result card; photo context when the ask stored an image. */
+/** Conversational follow-up about a result card; photo context when the ask stored an image.
+ *  zh-HK answers come as a 口語/書面 pair (answer/answerWritten). */
 export interface FollowUpService {
-  ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array }): Promise<Result<{ answer: string }>>;
+  ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ answer: string; answerWritten?: string }>>;
 }
 
 export interface AppDeps {

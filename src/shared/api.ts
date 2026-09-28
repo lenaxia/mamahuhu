@@ -241,8 +241,16 @@ export const FollowUpReqSchema = z.object({
   hanzi: z.string().max(200).optional(),
   gloss: z.string().max(300).optional(),
   askId: z.string().optional(),
+  /** variety of the card being asked about; shapes the answer language */
+  variety: VarietySchema.optional(),
 });
-export const FollowUpResSchema = z.object({ answer: z.string() });
+export const FollowUpResSchema = z.object({
+  /** zh-Hant: the answer. zh-HK: the 口語 (spoken) answer. */
+  answer: z.string(),
+  /** zh-HK only: the same answer in standard written Chinese (書面語) */
+  answerWritten: z.string().optional(),
+  variety: VarietySchema.optional(),
+});
 export type FollowUpRes = z.infer<typeof FollowUpResSchema>;
 
 /** POST /api/ask/stt — transcript + auto-routed payload */

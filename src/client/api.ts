@@ -111,8 +111,8 @@ export const api = {
     return (await res.json()) as { tags: import("../shared/api").Identify[]; identify?: import("../shared/api").Identify };
   },
 
-  followUp: (body: { question: string; hanzi?: string; gloss?: string; askId?: string }) =>
-    req<{ answer: string }>("/api/ask/followup", { method: "POST", body: JSON.stringify(body) }),
+  followUp: (body: { question: string; hanzi?: string; gloss?: string; askId?: string; variety?: "zh-Hant" | "zh-HK" }) =>
+    req<{ answer: string; answerWritten?: string; variety?: "zh-Hant" | "zh-HK" }>("/api/ask/followup", { method: "POST", body: JSON.stringify(body) }),
 
   reviewDue: () => req<Entry[]>("/api/review/due"),
   review: (id: string, outcome: "again" | "hard" | "good" | "easy") =>

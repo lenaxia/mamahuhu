@@ -147,7 +147,7 @@ export function ResultCard({ card }: { card: TranslateRes }) {
           {saved ? "Saved" : "Save"}
         </button>
       </div>
-      <FollowUpBox hanzi={variant.traditional} gloss={variant.gloss} />
+      <FollowUpBox hanzi={variant.traditional} gloss={variant.gloss} variety={variety} />
     </div>
   );
 }
