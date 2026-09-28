@@ -10,11 +10,11 @@ test.describe.configure({ mode: "serial" });
 
 test("dad: onboarding with bpmf, pinyin ask, save", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("one quick thing")).toBeVisible();
+  await expect(page.getByText("two quick things")).toBeVisible();
 
   await page.getByRole("tab", { name: "ㄅㄆㄇ" }).click();
   await page.getByRole("button", { name: "Start asking" }).click();
-  await expect(page.getByText("one quick thing")).toBeHidden();
+  await expect(page.getByText("two quick things")).toBeHidden();
 
   await page.getByPlaceholder(/rough pinyin/).fill("wo bu zhi dao");
   await page.getByRole("button", { name: "Send" }).click();
@@ -33,7 +33,7 @@ test("mom: english translate with register toggle, save", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("devUser", "mom"));
   await page.goto("/");
 
-  await expect(page.getByText("one quick thing")).toBeVisible();
+  await expect(page.getByText("two quick things")).toBeVisible();
   await page.getByRole("tab", { name: "Both" }).click();
   await page.getByRole("button", { name: "Start asking" }).click();
 
@@ -126,15 +126,15 @@ test("history records asks, unsaved included", async ({ page }) => {
 test("canto: enable both varieties, ask in 粵, jyutping required, save pair", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("devUser", "canto"));
   await page.goto("/");
-  await page.getByRole("button", { name: "Start asking" }).click();
+
+  // onboarding now offers varieties — enable Cantonese before starting
+  await expect(page.getByText("two quick things")).toBeVisible();
+  await page.getByText("廣東話 Cantonese").click();
 
   // single-variety user: no toggle chip yet
   await expect(page.getByRole("group", { name: "Ask variety" })).toHaveCount(0);
 
-  // enable Cantonese in settings (both varieties, canto default)
-  await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByText("廣東話 Cantonese").click();
-  await page.getByRole("button", { name: "Close" }).first().click();
+  await page.getByRole("button", { name: "Start asking" }).click();
 
   // toggle appeared, defaulting to the primary (國); switch to 粵 for this ask
   const variety = page.getByRole("group", { name: "Ask variety" });

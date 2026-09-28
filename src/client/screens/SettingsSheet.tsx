@@ -244,8 +244,9 @@ export function Onboarding({ me }: { me: Me }): React.JSX.Element {
           馬馬虎虎 <span className="text-neutral-400">Mamahuhu</span>
         </h2>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">
-          Hi {me.name} — one quick thing: how should words be annotated? You can change this anytime in settings.
+          Hi {me.name} — two quick things. You can change them anytime in settings.
         </p>
+        <VarietiesPicker me={me} onChange={(p) => void api.patchMe(p).then(setMe)} />
         <AnnotationPicker
           value={me.annotations}
           onChange={(annotations) => void api.patchMe({ annotations }).then(setMe)}
