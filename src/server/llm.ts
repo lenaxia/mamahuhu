@@ -157,12 +157,20 @@ Rules:
 - "casual" is COLLOQUIAL SPOKEN Cantonese (口語) written in Hong Kong characters — exactly what a
   parent says aloud: 唔係 (not 不是), 冇 (not 沒有), 嘅/咗/喺/佢/哋/啲, sentence particles 呀/啦/囉/㗎/嘛.
   It is spoken far more than read: sound natural aloud, keep it short.
+- Translate DIRECTLY into Cantonese. NEVER translate into Mandarin and convert the readings.
+  When the everyday word differs, it is ALWAYS the Cantonese one: 睇/看, 諗/想(think), 瞓覺/睡覺,
+  食/吃, 飲/喝, 畀/給, 嚟/來, 而家/現在, 邊度/哪裡, 點解/為什麼, 幾時/什麼時候, 屋企/家,
+  落雨/下雨, 返學/上學, 做緊乜/在做什麼, 知唔知/知不知道. A HK reader must never see Mandarin
+  wording in the casual field.
 - "formal" is standard written Chinese (書面語) for reading/writing contexts (school notes, signs):
   no Cantonese-specific characters at all.
 - "understood" is REQUIRED in the JSON: empty string "" for a direct phrase. If the input is a QUESTION
   ABOUT Cantonese (meta-question), fill it with the phrase/situation the user actually means in a few
   English words — then translate THAT in the normal fields. NEVER translate the question itself.
 - Translate MEANING AND INTENT, never word-for-word: "time for a bath" → casual 沖涼喇 / formal 該洗澡了.
+- PARTING/ROUTINE FORMULAS must use the idiomatic Cantonese, not the Mandarin calque:
+  "good night" → casual 早唞 (what a parent says at bedtime), formal 晚安 — NEVER 晚安喇.
+  Prefer what a HK speaker says aloud over the dictionary equivalent whenever they differ.
 - If an audience hint is provided, tune BOTH registers to that audience — never mention it in notes.
 - Honor inline disambiguation and parenthetical context hints; use them for sense, never translate them.
 - If the English is ambiguous, list 2-3 "alternatives" (most likely first), each its own pair.
@@ -243,6 +251,24 @@ export class MockTranslationService implements TranslationService {
   async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
     const t = text.toLowerCase();
     if (opts?.variety === "zh-HK") {
+      // bedtime formula regression fixture (register trap): the idiomatic 早唞,
+      // never the Mandarin calque 晚安喇 (wife-reported, 2026-09-28)
+      if (t.includes("good night")) {
+        return {
+          ok: true,
+          value: {
+            casual: completeVariant({
+              traditional: "早唞", simplified: "早唞", pinyin: "zou2 tau2",
+              gloss: "good night (spoken Cantonese)", note: "bedtime parting",
+            }, "zh-HK"),
+            formal: completeVariant({
+              traditional: "晚安", simplified: "晚安", pinyin: "maan5 on1",
+              gloss: "good night (written standard)", note: "書面語",
+            }, "zh-HK"),
+            alternatives: [],
+          },
+        };
+      }
       return {
         ok: true,
         value: {

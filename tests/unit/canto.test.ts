@@ -64,6 +64,19 @@ describe("zh-HK translate", () => {
     ]);
   });
 
+  it("good night uses the idiomatic 早唞, 晚安 stays formal (wife-reported trap)", async () => {
+    const res = await app.request("/api/ask/translate", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "good night", variety: "zh-HK" }),
+    });
+    const j = await res.json();
+    expect(j.casual.traditional).toBe("早唞");
+    expect(j.casual.jyutping).toBe("zou2 tau2");
+    expect(j.formal.traditional).toBe("晚安");
+    expect(j.casual.traditional).not.toContain("晚安");
+  });
+
   it("zh-Hant path is unchanged for a zh-Hant user", async () => {
     const res = await app.request("/api/ask/translate", {
       method: "POST",
