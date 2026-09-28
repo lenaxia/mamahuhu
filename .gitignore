@@ -9,3 +9,6 @@ playwright-report
 
 # canto spike: raw 27MB third-party data (see bench/canto-report.md); curated bundle will be committed
 vendor/canto/
+
+# opencode session state — local only
+.local/
