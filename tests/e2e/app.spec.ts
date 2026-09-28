@@ -71,14 +71,23 @@ test("annotation pref persists and changes rendering", async ({ page }) => {
   await page.getByRole("button", { name: "Words" }).click();
   await expect(page.locator('[data-traditional^="你要睡覺"]').first()).toBeVisible();
 
-  // mom is "Both": pinyin should be visible in list card
+  // list cards are plain hanzi — no annotation rows anywhere in the list
+  await expect(page.getByText("shuì", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("ㄕㄨㄟˋ", { exact: false })).toHaveCount(0);
+
+  // annotations live in the detail sheet: mom is "Both" → pinyin visible there
+  // (untitled sheet → no Close button; dismiss via backdrop tap)
+  await page.locator('[data-traditional^="你要睡覺"]').first().click();
   await expect(page.getByText("shuì", { exact: false }).first()).toBeVisible();
+  await page.mouse.click(8, 8);
+  await expect(page.getByText("shuì", { exact: false })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("tab", { name: "ㄅㄆㄇ" }).click();
-  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Close" }).click();
 
+  // detail sheet now shows bpmf instead
+  await page.locator('[data-traditional^="你要睡覺"]').first().click();
   await expect(page.getByText("shuì", { exact: false })).toHaveCount(0);
   await expect(page.getByText("ㄕㄨㄟˋ", { exact: false }).first()).toBeVisible();
 });
