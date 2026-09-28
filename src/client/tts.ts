@@ -24,19 +24,16 @@ export async function initTts(): Promise<void> {
 
 function browserVoice(variety: Variety): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis?.getVoices() ?? [];
+  // OSes ship legacy low-quality zh voices alongside enhanced/premium downloads;
+  // tone rendering on the legacy ones is flat — always prefer the upgrades.
+  const prefer = (list: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null =>
+    list.find((v) => /enhanced|premium|elegant|ultimate/i.test(v.name)) ?? list[0] ?? null;
   if (variety === "zh-HK") {
-    return (
-      voices.find((v) => /^zh[-_]HK/i.test(v.lang)) ??
-      voices.find((v) => /^yue/i.test(v.lang)) ??
-      voices.find((v) => /^zh[-_]TW/i.test(v.lang)) ??
-      null
-    );
+    const hk = voices.filter((v) => /^zh[-_]HK/i.test(v.lang));
+    const yue = voices.filter((v) => /^yue/i.test(v.lang));
+    return prefer(hk) ?? prefer(yue) ?? prefer(voices.filter((v) => /^zh[-_]TW/i.test(v.lang)));
   }
-  return (
-    voices.find((v) => /^zh[-_]TW/i.test(v.lang)) ??
-    voices.find((v) => /^zh/i.test(v.lang)) ??
-    null
-  );
+  return prefer(voices.filter((v) => /^zh[-_]TW/i.test(v.lang))) ?? prefer(voices.filter((v) => /^zh/i.test(v.lang)));
 }
 
 export function speak(text: string, opts?: { slow?: boolean; variety?: Variety }): void {
