@@ -2,12 +2,16 @@ import { useEffect, useState } from "react";
 import type { Entry } from "../../shared/api";
 import { api } from "../api";
 import { AnnotatedText } from "../components/AnnotatedText";
+import { Segmented } from "../components/Segmented";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { useToast } from "../components/Toast";
 
-/** Review = the simplest possible loop: see the English, say it out loud,
- *  tap to check, then Got it / Missed it. Got it spaces the card out;
+type Front = "en" | "zh";
+
+/** Review = the simplest possible loop — two directions:
+ *  EN→中文 (recall what to SAY) or 中文→EN (read & recognize).
+ *  Tap to check, then Got it / Missed it. Got it spaces the card out;
  *  Missed it brings it back soon. */
 export function ReviewScreen(): React.JSX.Element {
   const annotations = useAnnotations();
@@ -16,6 +20,15 @@ export function ReviewScreen(): React.JSX.Element {
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [front, setFront] = useState<Front>(
+    () => (localStorage.getItem("reviewFront") === "zh" ? "zh" : "en"),
+  );
+
+  function switchFront(f: Front): void {
+    setFront(f);
+    setFlipped(false);
+    localStorage.setItem("reviewFront", f);
+  }
 
   async function load(): Promise<void> {
     setLoading(true);
@@ -52,6 +65,15 @@ export function ReviewScreen(): React.JSX.Element {
 
   return (
     <div className="space-y-4">
+      <Segmented<Front>
+        className="w-full [&>button]:flex-1 flex"
+        value={front}
+        onChange={switchFront}
+        options={[
+          { value: "en", label: "EN → 中文" },
+          { value: "zh", label: "中文 → EN" },
+        ]}
+      />
       {loading && <div className="animate-pulse text-sm text-neutral-400">Loading…</div>}
       {!loading && queue.length === 0 && (
         <div className="rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 p-10 text-center">
@@ -69,6 +91,7 @@ export function ReviewScreen(): React.JSX.Element {
             {flipped ? (
               <>
                 <AnnotatedText syllables={card.syllables} annotations={annotations} variety={variety} />
+                <p className="text-[15px] text-neutral-600 dark:text-neutral-300">{card.english}</p>
                 <div className="flex items-center gap-2">
                   <span
                     role="button"
@@ -88,10 +111,15 @@ export function ReviewScreen(): React.JSX.Element {
                   </span>
                 </div>
               </>
-            ) : (
+            ) : front === "en" ? (
               <>
                 <p className="text-center text-2xl font-medium text-neutral-800 dark:text-neutral-100">{card.english}</p>
                 <span className="text-xs text-neutral-400">say it, then tap to check</span>
+              </>
+            ) : (
+              <>
+                <span lang={variety === "zh-HK" ? "zh-HK" : "zh-Hant"} className="hanzi text-4xl">{card.traditional}</span>
+                <span className="text-xs text-neutral-400">what does it mean? tap to check</span>
               </>
             )}
           </button>
