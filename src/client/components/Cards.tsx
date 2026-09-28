@@ -6,6 +6,7 @@ import { api } from "../api";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { AnnotatedText } from "./AnnotatedText";
+import { CopyButton } from "./CopyButton";
 import { IconCheck, IconPlay } from "./Icons";
 import { useToast } from "./Toast";
 
@@ -67,6 +68,7 @@ function ActionRow({
       >
         0.6×
       </button>
+      <CopyButton text={text} />
       <button
         onClick={onSave}
         disabled={saved}
@@ -172,18 +174,21 @@ export function FollowUpBox({ hanzi, gloss, askId, variety = "zh-Hant" }: { hanz
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 shrink-0 rounded bg-sky-100 dark:bg-sky-900/60 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">口語</span>
                 <p className="min-w-0 flex-1" lang="zh-HK">{answer.answer}</p>
-                <button aria-label="Play spoken answer" onClick={() => speak(answer.answer, { variety: "zh-HK" })} className="mt-0.5 shrink-0 text-neutral-400 active:text-neutral-600">▶</button>
+                <span className="flex shrink-0 items-center gap-1"><button aria-label="Play spoken answer" onClick={() => speak(answer.answer, { variety: "zh-HK" })} className="text-neutral-400 active:text-neutral-600">▶</button><CopyButton text={answer.answer} className="h-7 w-7" /></span>
               </div>
               {answer.answerWritten && (
                 <div className="flex items-start gap-2">
                   <span className="mt-0.5 shrink-0 rounded bg-neutral-200 dark:bg-neutral-700 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:text-neutral-300">書面</span>
                   <p className="min-w-0 flex-1">{answer.answerWritten}</p>
-                  <button aria-label="Play written answer" onClick={() => speak(answer.answerWritten ?? "", { variety: "zh-HK" })} className="mt-0.5 shrink-0 text-neutral-400 active:text-neutral-600">▶</button>
+                  <span className="flex shrink-0 items-center gap-1"><button aria-label="Play written answer" onClick={() => speak(answer.answerWritten ?? "", { variety: "zh-HK" })} className="text-neutral-400 active:text-neutral-600">▶</button><CopyButton text={answer.answerWritten ?? ""} className="h-7 w-7" /></span>
                 </div>
               )}
             </>
           ) : (
-            <p>{answer.answer}</p>
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1">{answer.answer}</p>
+              <CopyButton text={answer.answer} className="h-8 w-8 shrink-0" />
+            </div>
           )}
         </div>
       )}

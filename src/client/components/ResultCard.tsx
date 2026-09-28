@@ -7,6 +7,7 @@ import { speak } from "../tts";
 import { AnnotatedText } from "./AnnotatedText";
 import { Segmented } from "./Segmented";
 import { FollowUpBox } from "./Cards";
+import { CopyButton } from "./CopyButton";
 import { IconCheck, IconPlay } from "./Icons";
 import { useToast } from "./Toast";
 
@@ -134,6 +135,7 @@ export function ResultCard({ card }: { card: TranslateRes }) {
         >
           0.6×
         </button>
+        <CopyButton text={variant.traditional} className="h-11 w-11" />
         <button
           onClick={save}
           disabled={saved}

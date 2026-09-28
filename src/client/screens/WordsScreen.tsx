@@ -5,6 +5,7 @@ import { EntryCard } from "../components/EntryCard";
 import { Segmented } from "../components/Segmented";
 import { Sheet } from "../components/Sheet";
 import { IconPlay, IconTrash } from "../components/Icons";
+import { CopyButton } from "../components/CopyButton";
 import { AnnotatedText } from "../components/AnnotatedText";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
@@ -123,6 +124,7 @@ export function WordsScreen(): React.JSX.Element {
               >
                 0.6×
               </button>
+              <CopyButton text={open.traditional} className="h-11 w-11" />
               <button
                 onClick={() => void remove(open)}
                 className="ml-auto flex h-11 w-11 items-center justify-center rounded-full bg-red-50 dark:bg-red-950/50 text-red-500"
