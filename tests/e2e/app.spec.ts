@@ -164,3 +164,22 @@ test("canto: enable both varieties, ask in 粵, jyutping required, save pair", a
   await expect(page.getByText("粵").first()).toBeVisible();
   await expect(page.getByText(/書面/).first()).toBeVisible();
 });
+
+test("english with pinyin-shaped words routes to translation, not dictionary", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "route"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+
+  // "time to eat" syllabifies into pinyin-ish garbage (䶑嚜哦餓啊) — must translate
+  await page.getByPlaceholder(/rough pinyin/).fill("time to eat");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator('[data-traditional="你好"]')).toBeVisible();
+  await expect(page.getByText("Translate as English instead")).toHaveCount(0);
+
+  // real pinyin input still gets the dictionary view
+  await page.getByLabel("Clear result").click();
+  await page.getByPlaceholder(/rough pinyin/).fill("wo bu zhi dao");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator('[data-traditional="我不知道"]').first()).toBeVisible();
+  await expect(page.getByText("Translate as English instead").first()).toBeVisible();
+});

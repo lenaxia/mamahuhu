@@ -98,6 +98,13 @@ export function AskScreen(): React.JSX.Element {
     }
   }
 
+  /** English function/content words that can NEVER be pinyin input — their
+   *  presence means translate, don't waste the ask on dictionary guesswork
+   *  ("time to eat" used to match 䶑嚜哦餓啊 via fuzzy pinyin). Vetted: every
+   *  token here is an invalid pinyin syllable, so real pinyin input never trips it. */
+  const ENGLISH_HINT =
+    /\b(the|to|is|are|am|was|be|been|for|of|on|in|at|it|its|this|that|these|those|and|or|but|not|don'?t|doesn'?t|can|will|would|should|could|please|thanks?|hello|hi|goodbye|want|needs?|likes?|time|eat|sleep|school|bath|water|milk|home|now|here|there|what|where|why|how|who|when|let'?s)\b/i;
+
   async function submit(): Promise<void> {
     const t = text.trim();
     if (!t || busy) return;
@@ -113,6 +120,11 @@ export function AskScreen(): React.JSX.Element {
       } finally {
         setBusy(null);
       }
+      return;
+    }
+    if (!han && ENGLISH_HINT.test(t)) {
+      // English words present → intent-first translation, skip dictionary guesswork
+      await runTranslate(t);
       return;
     }
     setBusy("lookup");
