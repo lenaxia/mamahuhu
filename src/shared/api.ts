@@ -9,6 +9,10 @@ import { z } from "zod";
 export const AnnotationsSchema = z.enum(["both", "bpmf", "pinyin"]);
 export type Annotations = z.infer<typeof AnnotationsSchema>;
 
+/** Language variety: Mandarin (default) or spoken-first Cantonese. */
+export const VarietySchema = z.enum(["zh-Hant", "zh-HK"]);
+export type Variety = z.infer<typeof VarietySchema>;
+
 export const RegisterSchema = z.enum(["casual", "formal"]);
 export type Register = z.infer<typeof RegisterSchema>;
 
@@ -35,6 +39,10 @@ export const MeSchema = z.object({
   audience: z.string().nullable(),
   onboarded: z.boolean(),
   nameFromProxy: z.boolean(),
+  /** varieties this user asks in; the ask screen shows a toggle when >1 */
+  varieties: z.array(VarietySchema).min(1).default(["zh-Hant"]),
+  /** default variety for asks */
+  primaryVariety: VarietySchema.default("zh-Hant"),
 });
 export type Me = z.infer<typeof MeSchema>;
 
@@ -45,6 +53,8 @@ export const PatchMeReqSchema = z.object({
   ttsSpeed: z.number().min(0.5).max(1.5).optional(),
   audience: z.string().trim().max(120).nullable().optional(),
   onboarded: z.boolean().optional(),
+  varieties: z.array(VarietySchema).min(1).optional(),
+  primaryVariety: VarietySchema.optional(),
 });
 export type PatchMeReq = z.infer<typeof PatchMeReqSchema>;
 
@@ -55,6 +65,8 @@ export const CardVariantSchema = z.object({
   simplified: z.string().default(""),
   pinyin: z.string().min(1),
   bpmf: z.string().default(""),
+  /** jyutping for zh-HK cards — dictionary-derived, never LLM */
+  jyutping: z.string().default(""),
   gloss: z.string().default(""),
   note: z.string().optional(),
 });
@@ -63,12 +75,15 @@ export type CardVariant = z.infer<typeof CardVariantSchema>;
 export const TranslateReqSchema = z.object({
   text: z.string().trim().min(1).max(300),
   audience: z.string().trim().max(120).optional(),
+  /** variety to translate into; defaults to the user's primary */
+  variety: VarietySchema.optional(),
 });
 export type TranslateReq = z.infer<typeof TranslateReqSchema>;
 
 export const TranslateResSchema = z.object({
   source: z.string(),
   understood: z.string().optional(),
+  variety: VarietySchema.optional(),
   register: RegisterSchema,
   casual: CardVariantSchema.optional(),
   formal: CardVariantSchema.optional(),
@@ -248,6 +263,11 @@ export const CreateEntryReqSchema = z.object({
   pinyin: z.string().default(""),
   pinyinFlat: z.string().default(""),
   bpmf: z.string().default(""),
+  /** zh-HK entries: dictionary jyutping of `traditional` */
+  jyutping: z.string().default(""),
+  /** zh-HK entries: the 書面語 pair (formal variant text + its jyutping) */
+  formalZh: z.string().default(""),
+  formalJyut: z.string().default(""),
   english: z.string().default(""),
   register: RegisterSchema.default("casual"),
   exampleZh: z.string().max(500).optional(),
@@ -255,6 +275,7 @@ export const CreateEntryReqSchema = z.object({
   notes: z.string().max(2000).optional(),
   source: EntrySourceSchema,
   syllables: SyllablesSchema,
+  variety: VarietySchema.default("zh-Hant"),
 });
 export type CreateEntryReq = z.infer<typeof CreateEntryReqSchema>;
 
@@ -268,6 +289,9 @@ export const EntrySchema = z.object({
   pinyin: z.string(),
   pinyinFlat: z.string(),
   bpmf: z.string(),
+  jyutping: z.string().default(""),
+  formalZh: z.string().default(""),
+  formalJyut: z.string().default(""),
   english: z.string(),
   register: RegisterSchema,
   exampleZh: z.string().nullable(),

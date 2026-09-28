@@ -22,6 +22,8 @@ export function ResultCard({ card }: { card: TranslateRes }) {
   const [register, setRegister] = useState<Register>(card.register);
   const [altIdx, setAltIdx] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
+  const variety = card.variety ?? "zh-Hant";
+  const canto = variety === "zh-HK";
 
   const primary: Sense = {
     casual: { variant: card.casual!, syllables: card.syllables },
@@ -33,16 +35,23 @@ export function ResultCard({ card }: { card: TranslateRes }) {
 
   async function save(): Promise<void> {
     try {
+      // zh-HK saves the SPOKEN form as the entry and carries the 書面 pair alongside;
+      // zh-Hant saves whichever register is on screen.
+      const spoken = canto ? sense.casual : selected;
       const res = await api.createEntry({
-        traditional: variant.traditional,
-        simplified: variant.simplified,
-        pinyin: variant.pinyin,
-        pinyinFlat: stripToneMarks(variant.pinyin).replace(/\s+/g, ""),
-        bpmf: variant.bpmf,
-        english: variant.gloss,
-        register,
+        traditional: spoken.variant.traditional,
+        simplified: spoken.variant.simplified,
+        pinyin: spoken.variant.pinyin,
+        pinyinFlat: stripToneMarks(spoken.variant.pinyin).replace(/\s+/g, ""),
+        bpmf: spoken.variant.bpmf,
+        jyutping: canto ? spoken.variant.jyutping : "",
+        formalZh: canto ? (sense.formal?.variant.traditional ?? "") : "",
+        formalJyut: canto ? (sense.formal?.variant.jyutping ?? "") : "",
+        english: spoken.variant.gloss,
+        register: canto ? "casual" : register,
         source: "en-translate",
-        syllables,
+        syllables: canto ? sense.casual.syllables : syllables,
+        variety,
       });
       setSaved(true);
       show(res.duplicate ? "Already saved" : "Saved");
@@ -76,7 +85,7 @@ export function ResultCard({ card }: { card: TranslateRes }) {
         )}
       </div>
 
-      <AnnotatedText syllables={syllables} annotations={annotations} />
+      <AnnotatedText syllables={syllables} annotations={annotations} variety={variety} />
 
       <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{variant.gloss}</p>
       {variant.note && <p className="text-xs text-neutral-400">{variant.note}</p>}
@@ -113,14 +122,14 @@ export function ResultCard({ card }: { card: TranslateRes }) {
       <div className="flex items-center gap-2 pt-1">
         <button
           aria-label="Play audio"
-          onClick={() => speak(variant.traditional)}
+          onClick={() => speak(variant.traditional, { variety })}
           className="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 active:scale-95 transition"
         >
           <IconPlay className="h-5 w-5" />
         </button>
         <button
           aria-label="Play slowly"
-          onClick={() => speak(variant.traditional, { slow: true })}
+          onClick={() => speak(variant.traditional, { variety, slow: true })}
           className="flex h-11 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 px-3 text-xs font-semibold text-neutral-500 active:scale-95 transition"
         >
           0.6×

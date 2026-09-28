@@ -196,6 +196,8 @@ valid-syllable set ③ simplified script taken from CEDICT entries when present.
 | `MODEL_FAST` | `classifier` | cheap path: a3b variant, reserved for P2 classify |
 | `MODEL_VISION` | `default` | OCR (P2) — chat model is multimodal |
 | `MODEL_TTS` | `kokoro` | empty = browser TTS only |
+| `MODEL_TTS_CA` | — | Cantonese TTS model (e.g. edge-tts sidecar); empty = browser zh-HK voice fallback |
+| `TTS_VOICE_CA` | `zh-HK-HiuMaanNeural` | Cantonese voice for the MODEL_TTS_CA model |
 | `TTS_MODE` | `auto` | `auto` = server when MODEL_TTS set, else browser · `server` · `browser` |
 | `TTS_VOICE` | `zf_xiaoxiao` | kokoro zh voices: `zf_xiaoxiao`/`zf_xiaobei` (female), `zm_yunxi` (male) |
 | `MODEL_STT` | — | empty = browser Web Speech fallback |

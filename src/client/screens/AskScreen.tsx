@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
 import { api, ApiError } from "../api";
 import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard } from "../components/Cards";
@@ -56,6 +56,14 @@ export function AskScreen(): React.JSX.Element {
   const recognizer = useRef<BrowserRecognizer | null>(null);
   const micRec = useRef<MicRecorder | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const [askVariety, setAskVariety] = useState<"zh-Hant" | "zh-HK">(
+    (me?.primaryVariety as "zh-Hant" | "zh-HK") ?? "zh-Hant",
+  );
+  const multiVariety = (me?.varieties.length ?? 1) > 1;
+
+  useEffect(() => {
+    setAskVariety((cur) => (me?.varieties.includes(cur) ? cur : ((me?.primaryVariety as "zh-Hant" | "zh-HK") ?? "zh-Hant")));
+  }, [me]);
 
   const anythingActive =
     Boolean(translateCard || interps || cands || hanziWords || ocrResult || sttResult || listening || spokenText || ocrBusy);
@@ -82,7 +90,7 @@ export function AskScreen(): React.JSX.Element {
   async function runTranslate(t: string): Promise<void> {
     setBusy("translate");
     try {
-      setTranslateCard(await api.translate(t, me?.audience ?? undefined));
+      setTranslateCard(await api.translate(t, me?.audience ?? undefined, askVariety));
     } catch (e) {
       setError(e instanceof ApiError ? `Translation failed: ${e.message}` : "Translation failed");
     } finally {
@@ -234,6 +242,7 @@ export function AskScreen(): React.JSX.Element {
         setError(m);
       },
       (lang) => void lang,
+      askVariety === "zh-HK" ? "zh-HK" : "zh-TW",
     );
   }
 
@@ -266,6 +275,26 @@ export function AskScreen(): React.JSX.Element {
           />
         </div>
         <div className="mt-1 flex items-center gap-1.5">
+          {multiVariety && (
+            <div className="flex overflow-hidden rounded-full border border-neutral-300 dark:border-neutral-700" role="group" aria-label="Ask variety">
+              {([["zh-Hant", "國"], ["zh-HK", "粵"]] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setAskVariety(v)}
+                  className={`h-11 px-3 text-sm font-semibold transition ${
+                    askVariety === v
+                      ? v === "zh-HK"
+                        ? "bg-sky-500 text-white"
+                        : "bg-amber-500 text-white"
+                      : "bg-transparent text-neutral-500 dark:text-neutral-400"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             aria-label="Speak"

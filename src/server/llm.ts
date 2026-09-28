@@ -12,7 +12,20 @@ function completeVariant(v: {
   pinyin: string;
   gloss: string;
   note?: string;
-}): CardVariant {
+}, variety?: "zh-Hant" | "zh-HK"): CardVariant {
+  if (variety === "zh-HK") {
+    // romanization is recomputed from dictionary tables server-side;
+    // the model's own jyutping measured ~42% syllable error (bench/canto-report.md)
+    return {
+      traditional: v.traditional,
+      simplified: v.simplified || v.traditional,
+      pinyin: v.pinyin,
+      bpmf: "",
+      jyutping: "",
+      gloss: v.gloss,
+      note: v.note,
+    };
+  }
   const marks = v.pinyin.trim().split(/\s+/).filter(Boolean).map((s) => numberedToMarks(marksToNumbered(s)));
   const bpmf = v.pinyin.trim().split(/\s+/).filter(Boolean).map((s) => numberedToBpmf(marksToNumbered(s)));
   return {
@@ -20,12 +33,14 @@ function completeVariant(v: {
     simplified: v.simplified || v.traditional,
     pinyin: marks.join(" "),
     bpmf: bpmf.join(" "),
+    jyutping: "",
     gloss: v.gloss,
     note: v.note,
   };
 }
 
-function variantValid(v: CardVariant): boolean {
+function variantValid(v: CardVariant, variety?: "zh-Hant" | "zh-HK"): boolean {
+  if (variety === "zh-HK") return countHanzi(v.traditional) > 0; // romanization comes from tables
   const syls = v.pinyin.trim().split(/\s+/).filter(Boolean);
   if (syls.length !== countHanzi(v.traditional)) return false;
   return syls.every((s) => numberedToBpmf(marksToNumbered(s)) !== "");
@@ -133,12 +148,35 @@ Rules:
   note (optional): usage nuance in under 15 words.
 - Traditional characters first; simplified must match character-for-character length.`;
 
+const TRANSLATE_SYSTEM_CANTO = `You translate English into Cantonese for a Hong Kong parent talking to a child.
+Return ONLY valid JSON, no prose, matching exactly:
+{"casual":{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"},
+ "formal":{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"},
+ "alternatives":[{"casual":{…},"formal":{…}}],"understood":"…"}
+Rules:
+- "casual" is COLLOQUIAL SPOKEN Cantonese (口語) written in Hong Kong characters — exactly what a
+  parent says aloud: 唔係 (not 不是), 冇 (not 沒有), 嘅/咗/喺/佢/哋/啲, sentence particles 呀/啦/囉/㗎/嘛.
+  It is spoken far more than read: sound natural aloud, keep it short.
+- "formal" is standard written Chinese (書面語) for reading/writing contexts (school notes, signs):
+  no Cantonese-specific characters at all.
+- "understood" is REQUIRED in the JSON: empty string "" for a direct phrase. If the input is a QUESTION
+  ABOUT Cantonese (meta-question), fill it with the phrase/situation the user actually means in a few
+  English words — then translate THAT in the normal fields. NEVER translate the question itself.
+- Translate MEANING AND INTENT, never word-for-word: "time for a bath" → casual 沖涼喇 / formal 該洗澡了.
+- If an audience hint is provided, tune BOTH registers to that audience — never mention it in notes.
+- Honor inline disambiguation and parenthetical context hints; use them for sense, never translate them.
+- If the English is ambiguous, list 2-3 "alternatives" (most likely first), each its own pair.
+- "pinyin": best-effort jyutping is fine here — it is ignored downstream (readings come from a dictionary).
+- "simplified": copy "traditional" verbatim (Cantonese-specific characters have no simplified form).
+- gloss: short natural English meaning of the Cantonese; note (optional): usage nuance under 15 words.`;
+
 export class LlmTranslationService implements TranslationService {
   constructor(private chat: ChatClient, private model: string) {}
 
-  async translate(text: string, opts?: { audience?: string }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
+  async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
+    const variety = opts?.variety ?? "zh-Hant";
     const messages: ChatMessage[] = [
-      { role: "system", content: TRANSLATE_SYSTEM },
+      { role: "system", content: variety === "zh-HK" ? TRANSLATE_SYSTEM_CANTO : TRANSLATE_SYSTEM },
       {
         role: "user",
         content: opts?.audience?.trim()
@@ -153,16 +191,16 @@ export class LlmTranslationService implements TranslationService {
       raw = res.value;
       const parsed = LlmTranslateSchema.safeParse(extractJson(raw));
       if (parsed.success) {
-        const casual = completeVariant(parsed.data.casual);
-        const formalRaw = completeVariant(parsed.data.formal);
-        if (!variantValid(casual)) break; // repair retry below
-        const formal = variantValid(formalRaw) ? formalRaw : casual;
+        const casual = completeVariant(parsed.data.casual, variety);
+        const formalRaw = completeVariant(parsed.data.formal, variety);
+        if (!variantValid(casual, variety)) break; // repair retry below
+        const formal = variantValid(formalRaw, variety) ? formalRaw : casual;
         const alternatives = (parsed.data.alternatives ?? [])
           .map((alt) => {
-            const altCasual = completeVariant(alt.casual);
-            const altFormalRaw = completeVariant(alt.formal);
-            if (!variantValid(altCasual)) return null;
-            return { casual: altCasual, formal: variantValid(altFormalRaw) ? altFormalRaw : altCasual };
+            const altCasual = completeVariant(alt.casual, variety);
+            const altFormalRaw = completeVariant(alt.formal, variety);
+            if (!variantValid(altCasual, variety)) return null;
+            return { casual: altCasual, formal: variantValid(altFormalRaw, variety) ? altFormalRaw : altCasual };
           })
           .filter((a): a is { casual: CardVariant; formal: CardVariant } => a !== null)
           .slice(0, 3);
@@ -202,8 +240,24 @@ export class LlmTranslationService implements TranslationService {
 }
 
 export class MockTranslationService implements TranslationService {
-  async translate(text: string): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
+  async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
     const t = text.toLowerCase();
+    if (opts?.variety === "zh-HK") {
+      return {
+        ok: true,
+        value: {
+          casual: completeVariant({
+            traditional: "沖涼喇", simplified: "沖涼喇", pinyin: "cung1 loeng4 laa3",
+            gloss: "time for a bath (spoken Cantonese)", note: "mock canto fixture",
+          }, "zh-HK"),
+          formal: completeVariant({
+            traditional: "該洗澡了", simplified: "该洗澡了", pinyin: "gāi xǐ zǎo le",
+            gloss: "time for a bath (written standard)", note: "書面語",
+          }, "zh-HK"),
+          alternatives: [],
+        },
+      };
+    }
     if (t.includes("flight") || t.includes("airline")) {
       return {
         ok: true,
@@ -342,14 +396,14 @@ export class UnavailableTts implements TtsService {
 export class GatewayTtsService implements TtsService {
   constructor(private cfg: { base: string; key: string; model: string; voice: string }) {}
   available(): boolean { return true; }
-  async synthesize(text: string, opts?: { speed?: number }): Promise<Result<{ data: Uint8Array<ArrayBuffer>; mime: string }>> {
+  async synthesize(text: string, opts?: { speed?: number; voice?: string }): Promise<Result<{ data: Uint8Array<ArrayBuffer>; mime: string }>> {
     try {
       const res = await fetch(`${this.cfg.base}/audio/speech`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
         body: JSON.stringify({
           model: this.cfg.model,
-          voice: this.cfg.voice,
+          voice: opts?.voice ?? this.cfg.voice,
           input: text,
           speed: opts?.speed ?? 1,
           response_format: "mp3",

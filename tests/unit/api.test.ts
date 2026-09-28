@@ -296,7 +296,7 @@ describe("tts mode selection", () => {
       rmSync(tmp, { force: true });
       const a = (await makeApp({ sqlitePath: tmp, llmMock: true })).app;
       const s = await (await a.request("/api/tts/status")).json();
-      expect(s).toEqual({ available: false, mode: "browser" });
+      expect(s).toEqual({ available: false, mode: "browser", cantoAvailable: false, cantoMode: "browser" });
     } finally {
       delete process.env.TTS_MODE;
       delete process.env.MODEL_TTS;

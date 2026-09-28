@@ -122,3 +122,45 @@ test("history records asks, unsaved included", async ({ page }) => {
   await page.locator('[data-history-item="pinyin"]').first().click();
   await expect(page.getByText("dictionary match").first()).toBeVisible();
 });
+
+test("canto: enable both varieties, ask in 粵, jyutping required, save pair", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "canto"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+
+  // single-variety user: no toggle chip yet
+  await expect(page.getByRole("group", { name: "Ask variety" })).toHaveCount(0);
+
+  // enable Cantonese in settings (both varieties, canto default)
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByText("廣東話 Cantonese").click();
+  await page.getByRole("button", { name: "Close" }).first().click();
+
+  // toggle appeared, defaulting to the primary (國); switch to 粵 for this ask
+  const variety = page.getByRole("group", { name: "Ask variety" });
+  await expect(variety).toBeVisible();
+  await variety.getByRole("button", { name: "粵" }).click();
+  await expect(variety.getByRole("button", { name: "粵" })).toHaveClass(/bg-sky-500/);
+
+  await page.getByPlaceholder(/rough pinyin/).fill("time for a bath");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  // canto card: hanzi + per-char dictionary jyutping (required, full-size)
+  await expect(page.locator('[data-traditional="沖涼喇"]')).toBeVisible();
+  for (const syl of ["cung1", "loeng4", "laa3"]) {
+    await expect(page.getByText(syl, { exact: true }).first()).toBeVisible();
+  }
+  await page.getByRole("tab", { name: "formal" }).click();
+  await expect(page.locator('[data-traditional^="該洗澡"]')).toBeVisible();
+
+  // save captures the spoken form + pair
+  await page.getByRole("tab", { name: "casual" }).click();
+  await page.getByRole("button", { name: "Save" }).first().click();
+  await expect(page.getByText("Saved").first()).toBeVisible();
+
+  // words list shows the 粵 badge and the 書面 row
+  await page.getByRole("button", { name: "Words" }).click();
+  await expect(page.locator('[data-traditional="沖涼喇"]').first()).toBeVisible();
+  await expect(page.getByText("粵").first()).toBeVisible();
+  await expect(page.getByText(/書面/).first()).toBeVisible();
+});

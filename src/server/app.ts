@@ -31,6 +31,7 @@ import {
   FollowUpResSchema,
   TranslateReqSchema,
   TranslateResSchema,
+  VarietySchema,
   type Annotations,
   type Entry,
   type RenderedWord,
@@ -63,6 +64,7 @@ import { candidates, interpret, normalizePinyinInput, renderWord, segmentHanzi }
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
 import { parseImageDims } from "./imageinfo";
 import { toTraditional } from "../shared/cedict";
+import { annotateJyut, segmentJyut } from "../shared/jyutping";
 import type { AskKind } from "../shared/api";
 import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService, DescribeService, TaggingService, FollowUpService } from "./ports";
 
@@ -146,12 +148,15 @@ function meDTO(row: UserRow) {
     audience: row.audience ?? null,
     onboarded: Boolean(row.onboarded),
     nameFromProxy: isProxyAuth(),
+    varieties: JSON.parse(row.varieties ?? '["zh-Hant"]') as string[],
+    primaryVariety: row.primary_variety ?? "zh-Hant",
   });
 }
 
 interface EntryRow {
   id: string; user_id: string; variety: string; traditional: string; simplified: string;
-  pinyin: string; pinyin_flat: string; bpmf: string; english: string; register: string;
+  pinyin: string; pinyin_flat: string; bpmf: string; jyutping: string; formal_zh: string; formal_jyut: string;
+  english: string; register: string;
   example_zh: string | null; example_en: string | null; notes: string | null;
   tags: string; source: string; syllables: string; created_at: string; user_name?: string;
   srs_box: number; srs_due: string | null; srs_streak: number; review_count: number;
@@ -168,6 +173,9 @@ function entryDTO(row: EntryRow): Entry {
     pinyin: row.pinyin,
     pinyinFlat: row.pinyin_flat,
     bpmf: row.bpmf,
+    jyutping: row.jyutping ?? "",
+    formalZh: row.formal_zh ?? "",
+    formalJyut: row.formal_jyut ?? "",
     english: row.english,
     register: RegisterSchema.parse(row.register),
     exampleZh: row.example_zh,
@@ -214,6 +222,32 @@ function buildSyllables(variant: CardVariant, dict: Dictionary): { syllables: Sy
   }
   if (i !== syls.length) low = true;
   return { syllables: out, lowConfidence: low };
+}
+
+/** zh-HK: dictionary-derived jyutping syllables (word groups → per-char readings).
+ *  The LLM never supplies romanization for canto (bench/canto-report.md). */
+function buildCantoSyllables(text: string): Syllables {
+  const out: Syllables = [];
+  for (const part of segmentJyut(text)) {
+    const chars = [...part.word];
+    if (!chars.some(isHan)) continue; // punctuation passes through silently
+    const sylls = part.jyut?.split(" ") ?? [];
+    const chunk: Syllables[number] = chars.map((h) => ({ h, py: "", bpmf: "" }));
+    if (sylls.length === chars.length) {
+      chars.forEach((_, i) => {
+        chunk[i]!.py = sylls[i] ?? "";
+      });
+    }
+    out.push(chunk);
+  }
+  return out;
+}
+
+/** Decorates a canto variant with dictionary jyutping (in place + returned). */
+function decorateCanto(variant: CardVariant): CardVariant {
+  variant.jyutping = annotateJyut(variant.traditional);
+  variant.pinyin = variant.jyutping; // single romanization column; flat search works on jyutping too
+  return variant;
 }
 
 export type App = Hono<{ Variables: { user: UserRow } }>;
@@ -332,12 +366,18 @@ async function buildPhrase(
     if (parsed.data.ttsSpeed !== undefined) { sets.push("tts_speed = ?"); params.push(parsed.data.ttsSpeed); }
     if (parsed.data.audience !== undefined) { sets.push("audience = ?"); params.push(parsed.data.audience); }
     if (parsed.data.onboarded !== undefined) { sets.push("onboarded = ?"); params.push(parsed.data.onboarded ? 1 : 0); }
+    if (parsed.data.varieties !== undefined) { sets.push("varieties = ?"); params.push(JSON.stringify(parsed.data.varieties)); }
+    if (parsed.data.primaryVariety !== undefined) { sets.push("primary_variety = ?"); params.push(parsed.data.primaryVariety); }
     if (sets.length) {
       params.push(user.id);
       await sql.run(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, params);
     }
     const fresh = await sql.get<UserRow>("SELECT * FROM users WHERE id = ?", [user.id]);
-    return c.json(meDTO(fresh!));
+    // invariant: primary must be one of the enabled varieties
+    const me = meDTO(fresh!);
+    return c.json(me.primaryVariety && !me.varieties.includes(me.primaryVariety)
+      ? MeSchema.parse({ ...me, primaryVariety: me.varieties[0] })
+      : me);
   });
 
   // ---- ask: pinyin interpreter (local) ----
@@ -357,14 +397,30 @@ async function buildPhrase(
   app.post("/api/ask/translate", async (c) => {
     const parsed = TranslateReqSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "bad request" }, 400);
-    const res = await deps.translations.translate(parsed.data.text, { audience: c.get("user").audience ?? parsed.data.audience });
+    const user = c.get("user");
+    const variety: "zh-Hant" | "zh-HK" = parsed.data.variety
+      ?? (VarietySchema.safeParse(user.primary_variety).success ? (user.primary_variety as "zh-Hant" | "zh-HK") : "zh-Hant");
+    const res = await deps.translations.translate(parsed.data.text, { audience: user.audience ?? parsed.data.audience, variety });
     if (!res.ok) return c.json({ error: res.error }, 502);
-    const casual = buildSyllables(res.value.casual, dictionary);
-    const formal = buildSyllables(res.value.formal, dictionary);
+    const canto = variety === "zh-HK";
+    if (canto) {
+      decorateCanto(res.value.casual);
+      decorateCanto(res.value.formal);
+      for (const alt of res.value.alternatives) {
+        decorateCanto(alt.casual);
+        decorateCanto(alt.formal);
+      }
+    }
+    const casual = canto
+      ? { syllables: buildCantoSyllables(res.value.casual.traditional), lowConfidence: false }
+      : buildSyllables(res.value.casual, dictionary);
+    const formal = canto
+      ? { syllables: buildCantoSyllables(res.value.formal.traditional), lowConfidence: false }
+      : buildSyllables(res.value.formal, dictionary);
     const alternatives = res.value.alternatives
       .map((alt) => {
-        const cs = buildSyllables(alt.casual, dictionary);
-        const fs = buildSyllables(alt.formal, dictionary);
+        const cs = canto ? { syllables: buildCantoSyllables(alt.casual.traditional), lowConfidence: false } : buildSyllables(alt.casual, dictionary);
+        const fs = canto ? { syllables: buildCantoSyllables(alt.formal.traditional), lowConfidence: false } : buildSyllables(alt.formal, dictionary);
         return { casual: { variant: alt.casual, syllables: cs.syllables }, formal: { variant: alt.formal, syllables: fs.syllables }, ok: !cs.lowConfidence && !fs.lowConfidence };
       })
       .filter((a) => a.ok)
@@ -373,6 +429,7 @@ async function buildPhrase(
       source: parsed.data.text,
       understood: res.value.understood,
       register: "casual",
+      variety,
       casual: res.value.casual,
       formal: res.value.formal,
       syllables: casual.syllables,
@@ -380,7 +437,7 @@ async function buildPhrase(
       alternatives: alternatives.length ? alternatives : undefined,
       lowConfidence: casual.lowConfidence || formal.lowConfidence || undefined,
     });
-    await recordAsk(sql, c.get("user").id, "translate", parsed.data.text, payload);
+    await recordAsk(sql, user.id, "translate", parsed.data.text, payload);
     return c.json(payload);
   });
 
@@ -774,8 +831,8 @@ async function buildPhrase(
     const user = c.get("user");
     const e = parsed.data;
     const dup = await sql.get<EntryRow>(
-      "SELECT e.*, u.name AS user_name FROM entries e JOIN users u ON u.id = e.user_id WHERE e.user_id = ? AND e.traditional = ? AND e.pinyin = ?",
-      [user.id, e.traditional, e.pinyin],
+      "SELECT e.*, u.name AS user_name FROM entries e JOIN users u ON u.id = e.user_id WHERE e.user_id = ? AND e.traditional = ? AND e.pinyin = ? AND e.variety = ?",
+      [user.id, e.traditional, e.pinyin, e.variety],
     );
     if (dup) return c.json({ ...entryDTO(dup), duplicate: true });
     const id = randomUUID();
@@ -784,9 +841,9 @@ async function buildPhrase(
     const tagged = await deps.tagger.tagsFor({ traditional: e.traditional, english: e.english }).catch(() => null);
     const tags = tagged?.ok ? tagged.value : [];
     await sql.run(
-      `INSERT INTO entries (id, user_id, variety, traditional, simplified, pinyin, pinyin_flat, bpmf, english, register, example_zh, example_en, notes, tags, source, syllables, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, user.id, "zh-Hant", e.traditional, e.simplified, e.pinyin, flat, e.bpmf, e.english, e.register,
+      `INSERT INTO entries (id, user_id, variety, traditional, simplified, pinyin, pinyin_flat, bpmf, jyutping, formal_zh, formal_jyut, english, register, example_zh, example_en, notes, tags, source, syllables, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, user.id, e.variety, e.traditional, e.simplified, e.pinyin, flat, e.bpmf, e.jyutping, e.formalZh, e.formalJyut, e.english, e.register,
        e.exampleZh ?? null, e.exampleEn ?? null, e.notes ?? null, JSON.stringify(tags), e.source, JSON.stringify(e.syllables), new Date().toISOString()],
     );
     const row = await sql.get<EntryRow>(
@@ -851,15 +908,28 @@ async function buildPhrase(
   });
 
   // ---- tts ----
-  app.get("/api/tts/status", (c) => c.json({ available: tts.available(), mode: tts.available() ? "server" : "browser" }));
+  // canto voice: separate gateway model (e.g. edge-tts sidecar) + HK voice; falls
+  // back to unavailable → client uses browser speechSynthesis zh-HK
+  const ttsCaModel = process.env.MODEL_TTS_CA ?? "";
+  const ttsCa: TtsService = !mock && ttsCaModel && ttsMode !== "browser"
+    ? new GatewayTtsService({ base, key, model: ttsCaModel, voice: process.env.TTS_VOICE_CA ?? "zh-HK-HiuMaanNeural" })
+    : new UnavailableTts();
+  app.get("/api/tts/status", (c) => c.json({
+    available: tts.available(), mode: tts.available() ? "server" : "browser",
+    cantoAvailable: ttsCa.available(), cantoMode: ttsCa.available() ? "server" : "browser",
+  }));
   app.get("/api/tts", async (c) => {
     const text = (c.req.query("text") ?? "").trim();
     const speed = Number(c.req.query("speed") ?? "1");
+    const variety = c.req.query("variety") === "zh-HK" ? "zh-HK" : "zh-Hant";
     if (!text) return c.json({ error: "text required" }, 400);
     const sp = Number.isFinite(speed) ? speed : 1;
-    // disk cache under DATA_DIR/audio — synthesize once, replay forever
+    const engine = variety === "zh-HK" ? ttsCa : tts;
+    const voice = variety === "zh-HK" ? (process.env.TTS_VOICE_CA ?? "zh-HK-HiuMaanNeural") : (process.env.TTS_VOICE ?? "zf_xiaoxiao");
+    // disk cache under DATA_DIR/audio — synthesize once, replay forever (keyed by voice:
+    // mandarin and canto readings of the same hanzi must never collide)
     const { createHash } = await import("node:crypto");
-    const key = createHash("sha256").update(`${text}|${sp}`).digest("hex").slice(0, 40);
+    const key = createHash("sha256").update(`${text}|${sp}|${voice}`).digest("hex").slice(0, 40);
     const dir = `${dataDir()}/audio`;
     const path = `${dir}/${key}.mp3`;
     try {
@@ -868,7 +938,7 @@ async function buildPhrase(
     } catch {
       /* miss */
     }
-    const res = await tts.synthesize(text, { speed: sp });
+    const res = await engine.synthesize(text, { speed: sp });
     if (!res.ok) return c.json({ error: res.error }, 503);
     try {
       const { mkdir: mk, writeFile: wf } = await import("node:fs/promises");

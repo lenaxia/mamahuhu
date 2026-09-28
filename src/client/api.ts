@@ -57,10 +57,10 @@ export const api = {
   patchMe: (p: PatchMeReq) =>
     req<Me>("/api/me", { method: "PATCH", body: JSON.stringify(p) }),
 
-  translate: (text: string, audience?: string | null) =>
+  translate: (text: string, audience?: string | null, variety?: "zh-Hant" | "zh-HK") =>
     req<TranslateRes>("/api/ask/translate", {
       method: "POST",
-      body: JSON.stringify({ text, ...(audience ? { audience } : {}) }),
+      body: JSON.stringify({ text, ...(audience ? { audience } : {}), ...(variety ? { variety } : {}) }),
     }),
   pinyin: (text: string) =>
     req<PinyinRes>("/api/ask/pinyin", { method: "POST", body: JSON.stringify({ text }) }),
@@ -85,7 +85,7 @@ export const api = {
     req<Entry>(`/api/entries/${id}`, { method: "PATCH", body: JSON.stringify(p) }),
   deleteEntry: (id: string) => req<void>(`/api/entries/${id}`, { method: "DELETE" }),
 
-  ttsStatus: () => req<{ available: boolean }>("/api/tts/status"),
+  ttsStatus: () => req<{ available: boolean; cantoAvailable?: boolean }>("/api/tts/status"),
 
   sttStatus: () => req<{ available: boolean; mode: string }>("/api/stt/status"),
   stt: (audio: Blob): Promise<SttRes> =>

@@ -76,10 +76,10 @@ export function ReviewScreen(): React.JSX.Element {
           >
             {flipped ? (
               <>
-                <AnnotatedText syllables={card.syllables} annotations={annotations} />
+                <AnnotatedText syllables={card.syllables} annotations={annotations} variety={card.variety === "zh-HK" ? "zh-HK" : "zh-Hant"} />
                 <p className="text-[15px] text-neutral-600 dark:text-neutral-300">{card.english}</p>
                 <button
-                  onClick={(e) => { e.stopPropagation(); speak(card.traditional); }}
+                  onClick={(e) => { e.stopPropagation(); speak(card.traditional, { variety: card.variety === "zh-HK" ? "zh-HK" : "zh-Hant" }); }}
                   className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-4 py-2 text-xs font-semibold"
                 >
                   ▶ play

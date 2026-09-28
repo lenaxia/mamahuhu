@@ -93,7 +93,7 @@ export function WordsScreen(): React.JSX.Element {
       <Sheet open={open !== null} onClose={() => setOpen(null)}>
         {open && (
           <div className="space-y-4">
-            <AnnotatedText syllables={open.syllables.length ? open.syllables : [[{ h: open.traditional, py: open.pinyin, bpmf: open.bpmf }]]} annotations={annotations} />
+            <AnnotatedText syllables={open.syllables.length ? open.syllables : [[{ h: open.traditional, py: open.pinyin, bpmf: open.bpmf }]]} annotations={annotations} variety={(open.variety === "zh-HK" ? "zh-HK" : "zh-Hant")} />
             <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{open.english || "—"}</p>
             {open.tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
@@ -111,14 +111,14 @@ export function WordsScreen(): React.JSX.Element {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => speak(open.traditional)}
+                onClick={() => speak(open.traditional, { variety: (open.variety === "zh-HK" ? "zh-HK" : "zh-Hant") })}
                 className="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
                 aria-label="Play"
               >
                 <IconPlay className="h-5 w-5" />
               </button>
               <button
-                onClick={() => speak(open.traditional, { slow: true })}
+                onClick={() => speak(open.traditional, { variety: (open.variety === "zh-HK" ? "zh-HK" : "zh-Hant"), slow: true })}
                 className="flex h-11 items-center rounded-full bg-neutral-100 dark:bg-neutral-800 px-3 text-xs font-semibold text-neutral-500"
               >
                 0.6×

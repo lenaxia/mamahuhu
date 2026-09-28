@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Annotations, Me } from "../../shared/api";
+import type { Annotations, Me, Variety } from "../../shared/api";
 import { api } from "../api";
 import { BpmfColumn } from "../components/AnnotatedText";
 import { Segmented } from "../components/Segmented";
@@ -46,6 +46,8 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
         </div>
 
         <AnnotationPicker value={me.annotations} onChange={(annotations) => patch({ annotations })} />
+
+        <VarietiesPicker me={me} onChange={(p) => patch(p)} />
 
         <div>
           <label className="mb-1 block text-xs uppercase tracking-wide text-neutral-400">fine-tune translations</label>
@@ -140,6 +142,59 @@ export function AnnotationPicker({
           ))}
         </span>
       </div>
+    </div>
+  );
+}
+
+export function VarietiesPicker({ me, onChange }: { me: Me; onChange: (p: { varieties: Variety[]; primaryVariety: Variety }) => void }): React.JSX.Element {
+  const varieties = me.varieties.length ? me.varieties : ["zh-Hant" as const];
+  const both = varieties.length > 1;
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs uppercase tracking-wide text-neutral-400">varieties</label>
+      <div className="space-y-2">
+        {([
+          { v: "zh-Hant" as const, label: "國語 Mandarin", hint: "Taiwan-style traditional + zhuyin/pinyin" },
+          { v: "zh-HK" as const, label: "廣東話 Cantonese", hint: "spoken-first 口語 + jyutping, always audio" },
+        ]).map(({ v, label, hint }) => (
+          <label key={v} className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={varieties.includes(v)}
+              onChange={(e) => {
+                const next = e.target.checked ? [...varieties, v] : varieties.filter((x) => x !== v);
+                if (!next.length) return; // at least one variety
+                const primary = next.includes(me.primaryVariety) ? me.primaryVariety : next[0]!;
+                onChange({ varieties: next, primaryVariety: primary });
+              }}
+              className="mt-0.5 h-4 w-4 accent-amber-500"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">{label}</span>
+              <span className="block text-[11px] text-neutral-400">{hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {both && (
+        <div className="mt-2">
+          <label className="mb-1 block text-[11px] text-neutral-400">default for new asks</label>
+          <Segmented<Variety>
+            className="w-full [&>button]:flex-1 flex"
+            value={me.primaryVariety}
+            onChange={(primaryVariety) => onChange({ varieties, primaryVariety })}
+            options={[
+              { value: "zh-Hant", label: "國語" },
+              { value: "zh-HK", label: "粵" },
+            ]}
+          />
+        </div>
+      )}
+      {varieties.includes("zh-HK") && !ttsInfo().cantoServer && !ttsInfo().hkVoice && (
+        <p className="mt-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+          No Cantonese voice found — install a zh-HK voice in your OS speech settings for spoken 廣東話.
+        </p>
+      )}
     </div>
   );
 }

@@ -23,10 +23,14 @@ function useSaver(
         pinyin: w.pinyin,
         pinyinFlat: stripToneMarks(w.pinyin).replace(/\s+/g, ""),
         bpmf: w.bpmf,
+        jyutping: "",
+        formalZh: "",
+        formalJyut: "",
         english: w.english.split(" / ")[0] ?? w.english,
         register,
         source,
         syllables,
+        variety: "zh-Hant",
       });
       setSaved(true);
       onSaved?.(w.traditional);

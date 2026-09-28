@@ -26,14 +26,16 @@ export function browserSttSupported(): boolean {
   return Recognition() !== null;
 }
 
-export type SttLang = "zh-TW" | "en-US";
+export type SttLang = "zh-TW" | "zh-HK" | "en-US";
 
-/** Live browser recognizer with auto language detection: starts zh-TW, flips to
- *  en-US on Latin interim text (or after 3s of silence), once per session. */
+/** Live browser recognizer with auto language detection: starts on the given
+ *  zh locale (zh-TW for Mandarin asks, zh-HK for Cantonese), flips to en-US on
+ *  Latin interim text (or after 3s of silence), once per session. */
 export class BrowserRecognizer {
   private rec: any = null;
   private switched = false;
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private zhLang: SttLang = "zh-TW";
   private cbs: { onInterim: (t: string) => void; onFinal: (t: string, confidence?: number) => void; onError: (m: string) => void; onLang: (l: SttLang) => void } | null = null;
 
   startAuto(
@@ -41,10 +43,12 @@ export class BrowserRecognizer {
     onFinal: (text: string, confidence?: number) => void,
     onError: (msg: string) => void,
     onLang?: (lang: SttLang) => void,
+    zhLang: SttLang = "zh-TW",
   ): void {
     this.switched = false;
+    this.zhLang = zhLang === "zh-HK" ? "zh-HK" : "zh-TW";
     this.cbs = { onInterim, onFinal, onError, onLang: onLang ?? (() => {}) };
-    this.spinUp("zh-TW");
+    this.spinUp(this.zhLang);
     // no interim after 3s → maybe they're speaking English into a zh recognizer
     this.silenceTimer = setTimeout(() => this.trySwitch("en-US"), 3000);
   }
@@ -76,7 +80,7 @@ export class BrowserRecognizer {
         // Latin words while listening as zh → they're speaking English.
         // BUT mixed interim (latin + CJK) stays on zh: the zh recognizer
         // embeds English words far better than en handles Chinese.
-        if (!this.switched && lang === "zh-TW" && /[A-Za-z]{2,}/.test(interim) && !/\p{Script=Han}/u.test(interim)) {
+        if (!this.switched && lang !== "en-US" && /[A-Za-z]{2,}/.test(interim) && !/\p{Script=Han}/u.test(interim)) {
           this.trySwitch("en-US");
           return;
         }

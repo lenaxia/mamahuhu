@@ -36,6 +36,8 @@ export interface AltSense {
 export interface TranslateOptions {
   /** free-form audience/context hint, e.g. "talking to my 3-year-old" */
   audience?: string;
+  /** output variety; zh-HK = colloquial spoken Cantonese (口語) casual + 書面語 formal */
+  variety?: "zh-Hant" | "zh-HK";
 }
 
 export interface TranslateOutcome {
@@ -58,7 +60,7 @@ export interface TranslationService {
 /** Text-to-speech. Implementations: gateway model, or unavailable (client falls back to browser). */
 export interface TtsService {
   available(): boolean;
-  synthesize(text: string, opts?: { speed?: number }): Promise<Result<{ data: Uint8Array<ArrayBuffer>; mime: string }>>;
+  synthesize(text: string, opts?: { speed?: number; voice?: string }): Promise<Result<{ data: Uint8Array<ArrayBuffer>; mime: string }>>;
 }
 
 /** Speech-to-text (P2). */

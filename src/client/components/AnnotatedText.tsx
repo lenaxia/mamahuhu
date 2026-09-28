@@ -1,4 +1,4 @@
-import type { Annotations, Syllables } from "../../shared/api";
+import type { Annotations, Syllables, Variety } from "../../shared/api";
 
 const SPOKEN_TONES = new Set(["ˊ", "ˇ", "ˋ"]);
 
@@ -23,27 +23,33 @@ export function BpmfColumn({ bpmf, cls }: { bpmf: string; cls: string }) {
 /**
  * The annotation renderer: bopomofo stacked VERTICALLY to the right of each
  * character (Taiwan textbook style), pinyin BELOW, per the user's remembered
- * preference. Words wrap as units; a char and its annotations never split.
+ * preference. For zh-HK (Cantonese) the py line IS jyutping — the user's
+ * reading text — so it always renders, at near-hanzi size, with no bpmf column.
  */
 export function AnnotatedText({
   syllables,
   annotations,
+  variety = "zh-Hant",
   size = "lg",
   className = "",
 }: {
   syllables: Syllables;
   annotations: Annotations;
+  variety?: Variety;
   size?: "lg" | "sm";
   className?: string;
 }) {
-  const showBpmf = annotations === "both" || annotations === "bpmf";
-  const showPy = annotations === "both" || annotations === "pinyin";
+  const canto = variety === "zh-HK";
+  const showBpmf = !canto && (annotations === "both" || annotations === "bpmf");
+  const showPy = canto || annotations === "both" || annotations === "pinyin";
   const hanziCls = size === "lg" ? "text-[2rem] leading-[1.15]" : "text-[1.35rem] leading-[1.15]";
   const bpmfCls = size === "lg" ? "text-[0.58rem]" : "text-[0.48rem]";
-  const pyCls = size === "lg" ? "text-[0.7rem]" : "text-[0.6rem]";
+  const pyCls = canto
+    ? size === "lg" ? "text-[0.95rem] font-medium" : "text-[0.75rem] font-medium"
+    : size === "lg" ? "text-[0.7rem]" : "text-[0.6rem]";
 
   return (
-    <span lang="zh-Hant" className={`inline-flex flex-wrap items-start gap-x-[0.4em] gap-y-1 max-w-full ${className}`}>
+    <span lang={canto ? "zh-HK" : "zh-Hant"} className={`inline-flex flex-wrap items-start gap-x-[0.4em] gap-y-1 max-w-full ${className}`}>
       {syllables.map((word, wi) => (
         <span key={wi} className="inline-flex">
           {word.map((c, ci) => (

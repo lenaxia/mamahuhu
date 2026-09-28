@@ -20,6 +20,8 @@ controllers:
           OPENAI_API_BASE: http://litellm.litellm.svc.cluster.local:4000/v1
           MODEL_CHAT: default        # qwen3.8 27b multimodal
           MODEL_TTS: kokoro          # empty = browser TTS fallback
+          # Cantonese (optional): edge-tts sidecar behind the gateway
+          # MODEL_TTS_CA: edge       # TTS_VOICE_CA: zh-HK-HiuMaanNeural
           TTS_MODE: auto             # auto | server | browser
           TTS_VOICE: zf_xiaoxiao     # female zh: zf_xiaoxiao/zf_xiaobei · male: zm_yunxi
         envFrom:

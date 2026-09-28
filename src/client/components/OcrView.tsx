@@ -31,10 +31,14 @@ function IdentifyCard({ identify, onRefine, askId }: { identify: Identify; onRef
         pinyin: identify.pinyin,
         pinyinFlat: identify.pinyin.replace(/[^a-zü ]/gi, "").replace(/\s+/g, ""),
         bpmf: syllables[0]!.map((c) => c.bpmf).filter(Boolean).join(" "),
+        jyutping: "",
+        formalZh: "",
+        formalJyut: "",
         english: identify.gloss,
         register: "casual",
         source: "ocr",
         syllables,
+        variety: "zh-Hant",
       });
       setSaved(true);
       show(res.duplicate ? "Already saved" : "Saved");

@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS users (
   tts_speed REAL NOT NULL DEFAULT 1.0,
   audience TEXT,
   onboarded INTEGER NOT NULL DEFAULT 0,
+  varieties TEXT NOT NULL DEFAULT '["zh-Hant"]',
+  primary_variety TEXT NOT NULL DEFAULT 'zh-Hant',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS entries (
@@ -72,6 +74,9 @@ CREATE TABLE IF NOT EXISTS entries (
   bpmf TEXT NOT NULL DEFAULT '',
   english TEXT NOT NULL DEFAULT '',
   register TEXT NOT NULL DEFAULT 'casual',
+  jyutping TEXT NOT NULL DEFAULT '',
+  formal_zh TEXT NOT NULL DEFAULT '',
+  formal_jyut TEXT NOT NULL DEFAULT '',
   example_zh TEXT,
   example_en TEXT,
   notes TEXT,
@@ -124,7 +129,12 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   // additive migrations for pre-existing databases (both dialects)
   for (const col of [
     "ALTER TABLE users ADD COLUMN audience TEXT",
+    "ALTER TABLE users ADD COLUMN varieties TEXT NOT NULL DEFAULT '[\"zh-Hant\"]'",
+    "ALTER TABLE users ADD COLUMN primary_variety TEXT NOT NULL DEFAULT 'zh-Hant'",
     "ALTER TABLE entries ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE entries ADD COLUMN jyutping TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE entries ADD COLUMN formal_zh TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE entries ADD COLUMN formal_jyut TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE entries ADD COLUMN srs_box INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE entries ADD COLUMN srs_due TEXT",
     "ALTER TABLE entries ADD COLUMN srs_streak INTEGER NOT NULL DEFAULT 0",
@@ -142,6 +152,8 @@ export interface UserRow {
   tts_speed: number;
   audience: string | null;
   onboarded: number;
+  varieties: string;
+  primary_variety: string;
   created_at: string;
 }
 
@@ -156,11 +168,13 @@ export async function ensureUser(sql: Sql, extId: string, name: string): Promise
     tts_speed: 1.0,
     audience: null,
     onboarded: 0,
+    varieties: '["zh-Hant"]',
+    primary_variety: "zh-Hant",
     created_at: new Date().toISOString(),
   };
   await sql.run(
-    "INSERT INTO users (id, ext_id, name, annotations, tts_speed, audience, onboarded, created_at) VALUES (?,?,?,?,?,?,?,?)",
-    [user.id, user.ext_id, user.name, user.annotations, user.tts_speed, user.audience, user.onboarded, user.created_at],
+    "INSERT INTO users (id, ext_id, name, annotations, tts_speed, audience, onboarded, varieties, primary_variety, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    [user.id, user.ext_id, user.name, user.annotations, user.tts_speed, user.audience, user.onboarded, user.varieties, user.primary_variety, user.created_at],
   );
   return user;
 }

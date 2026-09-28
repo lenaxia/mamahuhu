@@ -48,6 +48,12 @@ exact object. Any card supports **follow-up questions** (*"what kind of tree?"*)
 - **Audio**: server TTS (kokoro) with a disk cache under `DATA_DIR/audio` —
   one synthesis per phrase, instant replay. Browser speech fallback when no
   model is configured.
+- **Cantonese (zh-HK)**: per-user variety — spoken-first 口語 translation with
+  **jyutping always shown** (dictionary-derived from words.hk/rime-cantonese
+  data; the model never romanizes — it measured ~42% syllable error), the
+  書面語 pair stored alongside, and a per-ask 國/粵 toggle when both varieties
+  are enabled. Canto audio uses `MODEL_TTS_CA` (e.g. edge-tts
+  `zh-HK-HiuMaanNeural`), falling back to the device's zh-HK voice.
 
 ## Annotations
 
