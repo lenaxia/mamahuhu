@@ -8,6 +8,7 @@ interactions.
 <div align="center">
   <img src="docs/ask-pinyin.png" width="200" alt="Ask: garbled pinyin interpreted" />
   <img src="docs/ask-translate.png" width="200" alt="Ask: English translation with registers" />
+  <img src="docs/ask-canto.png" width="200" alt="Ask: Cantonese (口語) with jyutping" />
   <img src="docs/photo-overlay.png" width="200" alt="Photo OCR word overlay" />
 </div>
 <div align="center">
