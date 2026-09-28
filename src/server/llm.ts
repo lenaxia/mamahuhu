@@ -681,7 +681,7 @@ const FOLLOWUP_SYSTEM_CANTO_EN =
 
 export class LlmFollowUpService implements FollowUpService {
   constructor(private cfg: { base: string; key: string; model: string }) {}
-  async ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ answer: string; answerWritten?: string }>> {
+  async ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array; variety?: "zh-Hant" | "zh-HK"; history?: { q: string; a: string }[] }): Promise<Result<{ answer: string; answerWritten?: string }>> {
     try {
       const context = input.hanzi ? `The user is asking about: ${input.hanzi}${input.gloss ? ` (${input.gloss})` : ""}.` : "";
       const textPart = { type: "text", text: `${context}\n${input.question}`.trim() };
@@ -689,6 +689,11 @@ export class LlmFollowUpService implements FollowUpService {
       if (input.photoBytes) {
         content.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${Buffer.from(input.photoBytes).toString("base64")}` } });
       }
+      // prior turns from this card's conversation — resolve "this/it" references
+      const priorMessages = (input.history ?? []).slice(-8).flatMap((h) => [
+        { role: "user", content: h.q },
+        { role: "assistant", content: h.a },
+      ]);
       const res = await fetch(`${this.cfg.base}/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
@@ -704,6 +709,7 @@ export class LlmFollowUpService implements FollowUpService {
                 ? (questionIsChinese(input.question) ? FOLLOWUP_SYSTEM_CANTO_ZH : FOLLOWUP_SYSTEM_CANTO_EN)
                 : FOLLOWUP_SYSTEM_MANDARIN,
             },
+            ...priorMessages,
             { role: "user", content },
           ],
         }),

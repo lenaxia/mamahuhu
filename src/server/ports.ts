@@ -101,9 +101,10 @@ export interface TaggingService {
 }
 
 /** Conversational follow-up about a result card; photo context when the ask stored an image.
- *  zh-HK answers come as a 口語/書面 pair (answer/answerWritten). */
+ *  zh-HK answers come as a 口語/書面 pair (answer/answerWritten). `history` carries the
+ *  card's earlier turns (client-threaded) so follow-ups resolve "this/it" references. */
 export interface FollowUpService {
-  ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ answer: string; answerWritten?: string }>>;
+  ask(input: { question: string; hanzi?: string; gloss?: string; photoBytes?: Uint8Array; variety?: "zh-Hant" | "zh-HK"; history?: { q: string; a: string }[] }): Promise<Result<{ answer: string; answerWritten?: string }>>;
 }
 
 export interface AppDeps {

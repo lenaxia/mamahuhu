@@ -132,13 +132,16 @@ export function FollowUpBox({ hanzi, gloss, askId, variety = "zh-Hant" }: { hanz
   const [q, setQ] = useState("");
   const [answer, setAnswer] = useState<{ answer: string; answerWritten?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // this card's conversation, threaded into each ask so "this/it" resolves (capped server-side at 8)
+  const [turns, setTurns] = useState<{ q: string; a: string }[]>([]);
 
   async function ask(): Promise<void> {
     if (!q.trim() || busy) return;
     setBusy(true);
     try {
-      const res = await api.followUp({ question: q.trim(), hanzi, gloss, ...(askId ? { askId } : {}), variety });
+      const res = await api.followUp({ question: q.trim(), hanzi, gloss, ...(askId ? { askId } : {}), variety, history: turns.slice(-6) });
       setAnswer({ answer: res.answer, answerWritten: res.answerWritten });
+      setTurns((t) => [...t.slice(-7), { q: q.trim(), a: res.answer }]);
       setQ("");
     } catch {
       setAnswer({ answer: "Couldn't answer that — try again." });
@@ -149,6 +152,19 @@ export function FollowUpBox({ hanzi, gloss, askId, variety = "zh-Hant" }: { hanz
 
   return (
     <div className="space-y-1.5">
+      {turns.length > 1 && (
+        <details className="rounded-xl px-3 py-1.5 text-xs text-neutral-400 dark:text-neutral-500">
+          <summary className="cursor-pointer select-none">{turns.length - 1} earlier answer{turns.length > 2 ? "s" : ""}</summary>
+          <div className="mt-1 space-y-1.5">
+            {turns.slice(0, -1).map((t, i) => (
+              <div key={i} className="space-y-0.5">
+                <p className="truncate">Q: {t.q}</p>
+                <p className="line-clamp-2">A: {t.a}</p>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
       {answer && (
         <div className="rounded-xl bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 space-y-1.5">
           {variety === "zh-HK" && answer.answerWritten ? (

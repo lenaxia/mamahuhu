@@ -182,6 +182,22 @@ describe("zh-HK follow-ups", () => {
     expect(j.answerWritten).toBeUndefined();
   });
 
+  it("threads prior turns as context (contract accepts history)", async () => {
+    const res = await app.request("/api/ask/followup", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({
+        question: "what about with strangers?",
+        hanzi: "早唞",
+        variety: "zh-HK",
+        history: [{ q: "when would I say this?", a: "早唞 is the casual bedtime parting." }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.answer).toBeTruthy();
+  });
+
   it("zh-Hant follow-ups stay single-answer", async () => {
     const res = await app.request("/api/ask/followup", {
       method: "POST",

@@ -736,7 +736,7 @@ async function buildPhrase(
     const user = c.get("user");
     const parsed = FollowUpReqSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "bad request" }, 400);
-    const { question, hanzi, gloss, askId, variety } = parsed.data;
+    const { question, hanzi, gloss, askId, variety, history } = parsed.data;
     let photoBytes: Uint8Array | undefined;
     if (askId) {
       const row = await sql.get<AskRow>("SELECT * FROM asks WHERE id = ? AND user_id = ?", [askId, user.id]);
@@ -746,7 +746,7 @@ async function buildPhrase(
         } catch { /* photo missing — answer without image */ }
       }
     }
-    const res = await deps.followUp.ask({ question, hanzi, gloss, photoBytes, variety });
+    const res = await deps.followUp.ask({ question, hanzi, gloss, photoBytes, variety, history });
     if (!res.ok) return c.json({ error: res.error }, 502);
     return c.json(FollowUpResSchema.parse({ answer: res.value.answer, answerWritten: res.value.answerWritten, variety }));
   });

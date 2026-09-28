@@ -243,6 +243,8 @@ export const FollowUpReqSchema = z.object({
   askId: z.string().optional(),
   /** variety of the card being asked about; shapes the answer language */
   variety: VarietySchema.optional(),
+  /** earlier turns in this card's conversation (client-threaded, most recent last) */
+  history: z.array(z.object({ q: z.string().max(300), a: z.string().max(600) })).max(8).optional(),
 });
 export const FollowUpResSchema = z.object({
   /** zh-Hant: the answer. zh-HK: the 口語 (spoken) answer. */
