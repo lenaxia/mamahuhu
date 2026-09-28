@@ -121,7 +121,7 @@ export function AnnotationPicker({
         onChange={onChange}
         options={[
           { value: "both", label: "Both" },
-          { value: "bpmf", label: "ㄅㄆㄇ" },
+          { value: "bpmf", label: "ㄅㄆㄇㄈ" },
           { value: "pinyin", label: "Pinyin" },
         ]}
       />

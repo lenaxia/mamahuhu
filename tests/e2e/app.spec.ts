@@ -12,7 +12,7 @@ test("dad: onboarding with bpmf, pinyin ask, save", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("two quick things")).toBeVisible();
 
-  await page.getByRole("tab", { name: "ㄅㄆㄇ" }).click();
+  await page.getByRole("tab", { name: "ㄅㄆㄇㄈ" }).click();
   await page.getByRole("button", { name: "Start asking" }).click();
   await expect(page.getByText("two quick things")).toBeHidden();
 
@@ -75,7 +75,7 @@ test("annotation pref persists and changes rendering", async ({ page }) => {
   await expect(page.getByText("shuì", { exact: false }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("tab", { name: "ㄅㄆㄇ" }).click();
+  await page.getByRole("tab", { name: "ㄅㄆㄇㄈ" }).click();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Close" }).click();
 
