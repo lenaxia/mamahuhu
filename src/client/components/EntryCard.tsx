@@ -9,11 +9,27 @@ function varietyOf(entry: Entry): Variety {
   return entry.variety === "zh-HK" ? "zh-HK" : "zh-Hant";
 }
 
+/** Entry saved without syllables (raw/manual creates): reconstruct per-char
+ *  annotations from the stored romanization text when it aligns, else show
+ *  the text under the phrase — never bare hanzi. */
+function fallbackSyllables(entry: Entry, variety: Variety) {
+  const rom = (variety === "zh-HK" ? entry.jyutping : entry.pinyin).trim();
+  const bpmf = variety === "zh-HK" ? "" : entry.bpmf.trim();
+  if (!rom) return null;
+  const chars = [...entry.traditional];
+  const parts = rom.split(/\s+/);
+  if (parts.length === chars.length) {
+    return [chars.map((h, i) => ({ h, py: parts[i] ?? "", bpmf: bpmf ? bpmf.split(/\s+/)[i] ?? "" : "" }))];
+  }
+  return [[{ h: entry.traditional, py: rom, bpmf }]];
+}
+
 /** List card for the Words tab: annotated hanzi (jyutping for 粵, zhuyin/pinyin
  *  for 國) + an explicit variety badge so the list reads at a glance. */
 export function EntryCard({ entry, onOpen }: { entry: Entry; onOpen: () => void }) {
   const annotations = useAnnotations();
   const variety = varietyOf(entry);
+  const syllables = entry.syllables.length > 0 ? entry.syllables : fallbackSyllables(entry, variety);
   return (
     <button
       onClick={onOpen}
@@ -22,8 +38,8 @@ export function EntryCard({ entry, onOpen }: { entry: Entry; onOpen: () => void 
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          {entry.syllables.length > 0 ? (
-            <AnnotatedText syllables={entry.syllables} annotations={annotations} variety={variety} size="sm" />
+          {syllables ? (
+            <AnnotatedText syllables={syllables} annotations={annotations} variety={variety} size="sm" />
           ) : (
             <span lang={variety === "zh-HK" ? "zh-HK" : "zh-Hant"} className="hanzi text-xl">{entry.traditional}</span>
           )}
