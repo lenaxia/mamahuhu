@@ -1,7 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconClose } from "./Icons";
 
-/** Bottom sheet — the mobile interaction primitive for details/settings. */
+/** Bottom sheet — the mobile interaction primitive for details/settings.
+ *  Dismiss by tapping the backdrop, the Close button (titled sheets), or
+ *  dragging/swiping DOWN on the sheet body. */
 export function Sheet({
   open,
   onClose,
@@ -15,6 +17,8 @@ export function Sheet({
 }) {
   const [mounted, setMounted] = useState(open);
   const [visible, setVisible] = useState(false);
+  const [drag, setDrag] = useState(0); // px the sheet has been pulled down
+  const startY = useRef<number | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -22,12 +26,15 @@ export function Sheet({
       requestAnimationFrame(() => setVisible(true));
     } else {
       setVisible(false);
+      setDrag(0);
       const t = setTimeout(() => setMounted(false), 200);
       return () => clearTimeout(t);
     }
   }, [open]);
 
   if (!mounted) return null;
+
+  const DRAG_CLOSE = 80; // px of downward pull that commits the dismiss
 
   return (
     <div className="fixed inset-0 z-50">
@@ -36,6 +43,23 @@ export function Sheet({
         onClick={onClose}
       />
       <div
+        onTouchStart={(e) => {
+          // only drag-to-dismiss from the top of the content — otherwise the
+          // swipe is a scroll inside the sheet
+          startY.current = e.currentTarget.scrollTop <= 0 ? (e.touches[0]?.clientY ?? null) : null;
+        }}
+        onTouchMove={(e) => {
+          if (startY.current === null) return;
+          const y = e.touches[0]?.clientY ?? startY.current;
+          setDrag(Math.max(0, y - startY.current));
+        }}
+        onTouchEnd={() => {
+          if (startY.current === null) return;
+          startY.current = null;
+          if (drag > DRAG_CLOSE) onClose();
+          else setDrag(0);
+        }}
+        style={drag > 0 ? { transform: `translateY(${drag}px)`, transition: "none" } : undefined}
         className={`absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-2xl bg-white dark:bg-neutral-900
         px-4 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl transition-transform duration-200
         ${visible ? "translate-y-0" : "translate-y-full"}`}
