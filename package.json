@@ -1,14 +1,14 @@
 {
   "name": "mamahuhu",
   "private": true,
-  "version": "0.4.2",
+  "version": "0.4.3",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch src/server/index.ts",
     "dev:web": "vite --host",
-    "build": "vite build && esbuild src/server/index.ts --bundle --platform=node --target=node22 --format=esm --external:better-sqlite3 --external:postgres --external:cedict-json --external:sharp --outfile=dist/server.js",
+    "build": "vite build && esbuild src/server/index.ts --bundle --platform=node --target=node22 --format=esm --external:better-sqlite3 --external:postgres --external:cedict-json --external:sharp --outfile=dist/server.js && esbuild src/server/retag.ts --bundle --platform=node --target=node22 --format=esm --external:better-sqlite3 --external:postgres --external:cedict-json --external:sharp --outfile=dist/retag.js",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
