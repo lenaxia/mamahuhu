@@ -631,21 +631,48 @@ export class MockDescribeService implements DescribeService {
   }
 }
 
+const TAGGING_SYSTEM = `Tag this vocabulary item from a family's Chinese phrasebook so they can FIND it later by typing related words.
+Return ONLY a JSON array of 6-12 short lowercase English tags, covering EVERY category below that applies:
+- topic: the domain (food, travel, school, bedtime, animals, weather, vehicles, sports, music, art, holidays…)
+- situation: when it would be said (mealtime, bath time, car ride, playground, supermarket, school pickup, doctor visit, cleanup, bedtime routine…)
+- function: what the phrase DOES (request, command, praise, comfort, warning, question, refusal, greeting, farewell, apology, thanks, negotiation, reminder…)
+- people: roles involved when relevant (mom, dad, kid, baby, teacher, doctor, friend, grandparents…)
+- things: concrete objects/beings mentioned (shoes, milk, backpack, tree, cat, plane…)
+- related: ideas a person might type instead of the literal meaning (for 攀岩: climbing, safety, heights)
+Rules: tags are PLAIN lowercase words with NO category prefix; one word or short two-word tags; no duplicates; no Chinese; plain words beat fancy ones (vehicle not conveyance). Cover the meaning, not just the surface words.`;
+
 export class LlmTaggingService implements TaggingService {
   constructor(private chat: ChatClient, private model: string) {}
   async tagsFor(input: { traditional: string; english: string }): Promise<Result<string[]>> {
-    const res = await this.chat.complete(
-      [
-        { role: "system", content: "Tag this Mandarin vocabulary item with 3-6 short lowercase English TOPIC tags a parent would search by (e.g. airport, travel, food, bedtime, family, body, animals, colors, numbers, greetings, manners, weather, clothes, school, play, emotions, household, outside, vehicles, doctor). Return ONLY a JSON array of strings, no prose. No duplicates. Generic topics beat synonyms (vehicle, not conveyance)." },
-        { role: "user", content: `${input.traditional} — ${input.english}` },
-      ],
-      { model: this.model, temperature: 0, maxTokens: 120 },
-    );
-    if (!res.ok) return res;
-    const parsed = extractJson(res.value);
-    if (!Array.isArray(parsed)) return { ok: false, error: "tagger returned non-array" };
-    const tags = [...new Set(parsed.filter((t): t is string => typeof t === "string" && /^[a-z][a-z -]{1,24}$/.test(t)).map((t) => t.trim()))].slice(0, 6);
-    return tags.length ? { ok: true, value: tags } : { ok: false, error: "no valid tags" };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await this.chat.complete(
+        [
+          { role: "system", content: TAGGING_SYSTEM },
+          { role: "user", content: `${input.traditional} — ${input.english}` },
+        ],
+        { model: this.model, temperature: 0, maxTokens: 250 },
+      );
+      if (!res.ok) return res;
+      // JSON array, or the model's occasional UNQUOTED array ([climbing, rock, …])
+      let parsed: unknown = extractJson(res.value);
+      if (!Array.isArray(parsed)) {
+        const m = res.value.match(/\[([\s\S]*?)\]/);
+        if (m) {
+          parsed = m[1]!.split(",").map((s) => s.trim().replace(/^["']+|["']+$/g, ""));
+        }
+      }
+      if (Array.isArray(parsed)) {
+        // the model sometimes prefixes category labels ("situation: playground") — strip them
+        const tags = [...new Set(parsed
+          .filter((t): t is string => typeof t === "string")
+          .map((t) => t.trim().toLowerCase().replace(/^(topic|situation|function|people|things|related):\s*/, ""))
+          .filter((t) => /^[a-z][a-z -]{1,24}$/.test(t)))]
+          .slice(0, 12);
+        if (tags.length) return { ok: true, value: tags };
+      }
+      // retry on non-array / all-invalid output
+    }
+    return { ok: false, error: "tagger returned no usable tags" };
   }
 }
 

@@ -860,9 +860,14 @@ async function buildPhrase(
     const params: unknown[] = [];
     if (scope === "mine") { where.push("e.user_id = ?"); params.push(user.id); }
     if (q) {
-      where.push("(LOWER(e.traditional) LIKE ? OR LOWER(e.simplified) LIKE ? OR e.pinyin_flat LIKE ? OR LOWER(e.english) LIKE ? OR LOWER(e.tags) LIKE ?)");
-      const like = `%${q}%`;
-      params.push(like, like, like, like, like);
+      // multi-token AND search: every word must hit some field (substring),
+      // so "airport terminal", "airp", or "sleep bed" all work
+      const tokens = q.split(/\s+/).filter(Boolean);
+      for (const tok of tokens) {
+        where.push("(LOWER(e.traditional) LIKE ? OR LOWER(e.simplified) LIKE ? OR e.pinyin_flat LIKE ? OR LOWER(e.english) LIKE ? OR LOWER(e.tags) LIKE ?)");
+        const like = `%${tok}%`;
+        params.push(like, like, like, like, like);
+      }
     }
     const rows = await sql.all<EntryRow>(
       `SELECT e.*, u.name AS user_name FROM entries e JOIN users u ON u.id = e.user_id
