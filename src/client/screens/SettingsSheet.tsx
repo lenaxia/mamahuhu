@@ -96,7 +96,7 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
         {import.meta.env.DEV && <DevUserSwitcher />}
 
         <p className="text-center text-[11px] text-neutral-400">
-          Mamahuhu 馬馬虎虎 · v0.4.5
+          Mamahuhu 馬馬虎虎 · v0.4.6
           <br />
           identity comes from your reverse proxy ({me.name})
         </p>
