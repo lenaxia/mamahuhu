@@ -60,7 +60,7 @@ export function Sheet({
           else setDrag(0);
         }}
         style={drag > 0 ? { transform: `translateY(${drag}px)`, transition: "none" } : undefined}
-        className={`absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-2xl bg-white dark:bg-neutral-900
+        className={`absolute inset-x-0 bottom-0 mx-auto max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white dark:bg-neutral-900
         px-4 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl transition-transform duration-200
         ${visible ? "translate-y-0" : "translate-y-full"}`}
       >

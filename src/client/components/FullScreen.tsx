@@ -51,7 +51,11 @@ export function FullScreen({
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]">{children}</div>
+          {/* phone-width column centered — `w-full` images would blow up to
+              window size on desktop, far past their native resolution */}
+          <div className="flex-1 overflow-y-auto px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            <div className="mx-auto w-full max-w-md">{children}</div>
+          </div>
         </div>
       </div>
     </div>
