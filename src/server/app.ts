@@ -43,6 +43,7 @@ import { makeSql, ensureSchema, type Sql, type UserRow } from "./db";
 import { loadDictionary, type Dictionary } from "./dict";
 import { identityMiddleware, isProxyAuth } from "./auth";
 import {
+  FallbackChatClient,
   GatewayChatClient,
   GatewayOcrService,
   GatewaySttService,
@@ -266,6 +267,8 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
   const base = process.env.OPENAI_API_BASE ?? "https://api.openai.com/v1";
   const key = process.env.OPENAI_API_KEY ?? "";
   const chatModel = process.env.MODEL_CHAT ?? "default";
+  // optional: retry chat calls on this model when the primary fails (unset = graceful, no retry)
+  const chatFallback = process.env.MODEL_CHAT_FALLBACK?.trim() || undefined;
   // TTS_MODE: auto (default) = server model when configured, else browser;
   // server = force gateway TTS; browser = force browser speechSynthesis.
   const ttsMode = (process.env.TTS_MODE ?? "auto") as "auto" | "server" | "browser";
@@ -273,7 +276,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
 
   const translations: TranslationService = mock
     ? new MockTranslationService()
-    : new LlmTranslationService(new GatewayChatClient({ base, key, defaultModel: chatModel }), chatModel);
+    : new LlmTranslationService(new FallbackChatClient(new GatewayChatClient({ base, key, defaultModel: chatModel }), chatFallback), chatModel);
 
   const useServerTts = !mock && ttsModel && ttsMode !== "browser";
   const tts: TtsService = useServerTts
@@ -295,7 +298,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
   const fastModel = process.env.MODEL_FAST ?? "default";
   const tagger: TaggingService = mock
     ? new MockTaggingService()
-    : new LlmTaggingService(new GatewayChatClient({ base, key, defaultModel: fastModel }), fastModel);
+    : new LlmTaggingService(new FallbackChatClient(new GatewayChatClient({ base, key, defaultModel: fastModel }), chatFallback), fastModel);
 
   const followUp: FollowUpService = mock
     ? new MockFollowUpService()

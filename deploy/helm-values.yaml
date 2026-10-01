@@ -18,7 +18,9 @@ controllers:
           AUTH_NAME_HEADER: x-authentik-name
           # --- models via LiteLLM ---
           OPENAI_API_BASE: http://litellm.litellm.svc.cluster.local:4000/v1
-          MODEL_CHAT: default        # qwen3.8 27b multimodal
+          MODEL_CHAT: default
+          # optional: retry chat (translate/tags) on this model if the primary fails
+          # MODEL_CHAT_FALLBACK: classifier        # qwen3.8 27b multimodal
           MODEL_TTS: kokoro          # empty = browser TTS fallback
           # Cantonese: edge-tts sidecar (talos-ops-prod #2592), zh-HK neural voices
           MODEL_TTS_CA: edge

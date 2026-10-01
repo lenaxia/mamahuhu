@@ -193,6 +193,7 @@ valid-syllable set ③ simplified script taken from CEDICT entries when present.
 | `OPENAI_API_BASE` | `https://api.openai.com/v1` | your LiteLLM |
 | `OPENAI_API_KEY` | — | |
 | `MODEL_CHAT` | `default` | translate/define (qwen3.8 27b multimodal) |
+| `MODEL_CHAT_FALLBACK` | — | retry chat calls on this model when the primary fails (empty = no retry) |
 | `MODEL_FAST` | `classifier` | cheap path: a3b variant, reserved for P2 classify |
 | `MODEL_VISION` | `default` | OCR (P2) — chat model is multimodal |
 | `MODEL_TTS` | `kokoro` | empty = browser TTS only |

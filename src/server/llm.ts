@@ -81,6 +81,19 @@ export function extractJson(text: string): unknown {
   return null;
 }
 
+/** Retries a failed chat call once on the fallback model (MODEL_CHAT_FALLBACK).
+ *  Transport-level failures only (HTTP errors, timeouts, empty completions);
+ *  unset fallback = pure pass-through. */
+export class FallbackChatClient implements ChatClient {
+  constructor(private primary: ChatClient, private fallbackModel: string | undefined) {}
+
+  async complete(messages: ChatMessage[], opts?: ChatOptions): Promise<Result<string>> {
+    const first = await this.primary.complete(messages, opts);
+    if (first.ok || !this.fallbackModel || opts?.model === this.fallbackModel) return first;
+    return this.primary.complete(messages, { ...opts, model: this.fallbackModel });
+  }
+}
+
 export class GatewayChatClient implements ChatClient {
   constructor(
     private cfg: { base: string; key: string; defaultModel: string },
