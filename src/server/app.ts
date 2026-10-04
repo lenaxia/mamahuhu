@@ -159,7 +159,7 @@ interface EntryRow {
   pinyin: string; pinyin_flat: string; bpmf: string; jyutping: string; formal_zh: string; formal_jyut: string;
   english: string; register: string;
   example_zh: string | null; example_en: string | null; notes: string | null;
-  tags: string; source: string; syllables: string; created_at: string; user_name?: string;
+  tags: string; source: string; syllables: string; created_at: string; ask_id?: string | null; user_name?: string;
   srs_box: number; srs_due: string | null; srs_streak: number; review_count: number;
 }
 
@@ -189,6 +189,7 @@ function entryDTO(row: EntryRow): Entry {
     srsBox: row.srs_box ?? 0,
     srsDue: row.srs_due ?? null,
     srsStreak: row.srs_streak ?? 0,
+    askId: row.ask_id ?? null,
   });
 }
 
@@ -440,7 +441,10 @@ async function buildPhrase(
       alternatives: alternatives.length ? alternatives : undefined,
       lowConfidence: casual.lowConfidence || formal.lowConfidence || undefined,
     });
-    await recordAsk(sql, user.id, "translate", parsed.data.text, payload);
+    const askId = await recordAsk(sql, user.id, "translate", parsed.data.text, payload);
+    payload.askId = askId;
+    // keep the stored copy in sync so history replay also carries the link
+    await sql.run("UPDATE asks SET result = ? WHERE id = ?", [JSON.stringify(payload), askId]).catch(() => undefined);
     return c.json(payload);
   });
 
@@ -538,9 +542,11 @@ async function buildPhrase(
           count++;
         }
         if (count === 0) return c.json({ error: "pdf rendered no pages" }, 502);
+        const pdfFull = await fullTranslation(pageTexts.join("\n"));
         const payload = OcrResSchema.parse({
           lines: pages[0]!.lines, fullText: pageTexts.join("\n\n"), positioned: false,
           pages, pageCount: count,
+          fullTranslation: pdfFull,
         });
         await recordAsk(sql, user.id, "ocr", pageTexts.join(" ").slice(0, 200) || `pdf (${count} pages)`, payload, storedPages[0]);
         // stash per-page paths for the ?page= endpoint via naming convention (-pN suffix)
@@ -636,15 +642,27 @@ async function buildPhrase(
       return c.json(payload);
     }
     // text photo: overlay + ALSO tag visible subjects (sign + plant case)
-    const objTags = await identifyTags(nBytes);
+    const [objTags, fullTranslationText] = await Promise.all([
+      identifyTags(nBytes),
+      fullTranslation(lineTexts.join("\n")),
+    ]);
     const payload = OcrResSchema.parse({
       lines, fullText: lineTexts.join("\n"), positioned,
       tags: objTags.length ? objTags : undefined,
       identify: objTags[0],
+      fullTranslation: fullTranslationText,
     });
     payload.askId = await recordAsk(sql, user.id, "ocr", lineTexts.join(" ").slice(0, 200), payload, stored);
     return c.json(payload);
   });
+
+  /** full English translation for multi-phrase text (photos, PDFs); null for single phrases */
+  const fullTranslation = async (fullText: string): Promise<string | undefined> => {
+    const segs = segmentHanzi(fullText).filter((s) => s.trim().length > 0);
+    if (segs.length <= 1) return undefined; // single phrase — its own card carries the meaning
+    const res = await deps.translations.fullZh(fullText.trim());
+    return res.ok ? res.value : undefined;
+  };
 
   const identifyTags = async (rawBytes: Uint8Array | Buffer): Promise<(z.infer<typeof IdentifySchema> & { bpmf: string })[]> => {
     const res = await deps.describe.identify(new Blob([new Uint8Array(rawBytes)], { type: "image/jpeg" }));
@@ -844,10 +862,10 @@ async function buildPhrase(
     const tagged = await deps.tagger.tagsFor({ traditional: e.traditional, english: e.english }).catch(() => null);
     const tags = tagged?.ok ? tagged.value : [];
     await sql.run(
-      `INSERT INTO entries (id, user_id, variety, traditional, simplified, pinyin, pinyin_flat, bpmf, jyutping, formal_zh, formal_jyut, english, register, example_zh, example_en, notes, tags, source, syllables, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO entries (id, user_id, variety, traditional, simplified, pinyin, pinyin_flat, bpmf, jyutping, formal_zh, formal_jyut, english, register, example_zh, example_en, notes, tags, source, syllables, ask_id, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, user.id, e.variety, e.traditional, e.simplified, e.pinyin, flat, e.bpmf, e.jyutping, e.formalZh, e.formalJyut, e.english, e.register,
-       e.exampleZh ?? null, e.exampleEn ?? null, e.notes ?? null, JSON.stringify(tags), e.source, JSON.stringify(e.syllables), new Date().toISOString()],
+       e.exampleZh ?? null, e.exampleEn ?? null, e.notes ?? null, JSON.stringify(tags), e.source, JSON.stringify(e.syllables), e.askId ?? null, new Date().toISOString()],
     );
     const row = await sql.get<EntryRow>(
       "SELECT e.*, u.name AS user_name FROM entries e JOIN users u ON u.id = e.user_id WHERE e.id = ?", [id],

@@ -13,6 +13,7 @@ import { useToast } from "./Toast";
 function useSaver(
   source: EntrySource,
   onSaved?: (traditional: string) => void,
+  askId?: string,
 ): { saved: boolean; save: (w: RenderedWord, syllables: Syllables, register?: "casual" | "formal") => Promise<void> } {
   const show = useToast().show;
   const [saved, setSaved] = useState(false);
@@ -32,6 +33,7 @@ function useSaver(
         source,
         syllables,
         variety: "zh-Hant",
+        ...(askId ? { askId } : {}),
       });
       setSaved(true);
       onSaved?.(w.traditional);
@@ -243,9 +245,9 @@ export function PhraseCard({
 }
 
 /** Hanzi-input / OCR word card. */
-export function HanziWordCard({ word, onSaved }: { word: RenderedWord & { known: boolean }; onSaved?: (t: string) => void }) {
+export function HanziWordCard({ word, onSaved, askId }: { word: RenderedWord & { known: boolean }; onSaved?: (t: string) => void; askId?: string }) {
   const annotations = useAnnotations();
-  const { saved, save } = useSaver("hanzi", onSaved);
+  const { saved, save } = useSaver("hanzi", onSaved, askId);
   const syllables: Syllables = [wordChars(word)];
   return (
     <div data-traditional={word.traditional} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">

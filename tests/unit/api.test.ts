@@ -361,6 +361,33 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     expect(body.positioned).toBe(true);
     expect(shuijiao?.box?.[0]).toBeCloseTo(344, 0);
     expect(xiaomao?.box?.[0]).toBeCloseTo(20, 0);
+    // multi-phrase text (小貓 + 在 + 睡覺) → complete English translation attached
+    expect(body.fullTranslation).toContain("MOCK full translation");
+    expect(body.askId).toBeTruthy();
+  });
+
+  it("entries link to their source ask; follow-ups survive history deletion", async () => {
+    // save an entry carrying the ask link
+    const e = await (
+      await app.request("/api/entries", {
+        method: "POST",
+        headers: H,
+        body: JSON.stringify({
+          traditional: "攀岩", simplified: "攀岩", pinyin: "pān yán", english: "climbing",
+          register: "casual", source: "en-translate", syllables: [], askId: "00000000-0000-4000-8000-000000000000",
+        }),
+      })
+    ).json();
+    expect(e.askId).toBe("00000000-0000-4000-8000-000000000000");
+
+    // follow-up against an ask that doesn't exist (deleted history) still answers, no photo
+    const f = await app.request("/api/ask/followup", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ question: "when would I say this?", hanzi: "攀岩", askId: "00000000-0000-4000-8000-000000000000" }),
+    });
+    expect(f.status).toBe(200);
+    expect((await f.json()).answer).toBeTruthy();
   });
 });
 

@@ -82,6 +82,8 @@ export type TranslateReq = z.infer<typeof TranslateReqSchema>;
 
 export const TranslateResSchema = z.object({
   source: z.string(),
+  /** history id of this ask — passed back on save to link the entry to its photo */
+  askId: z.string().optional(),
   understood: z.string().optional(),
   variety: VarietySchema.optional(),
   register: RegisterSchema,
@@ -233,6 +235,8 @@ export const OcrResSchema = z.object({
   pageCount: z.number().optional(),
   /** history id of this ask — powers photo-context follow-ups */
   askId: z.string().optional(),
+  /** complete English translation of the full text (multi-phrase input only) */
+  fullTranslation: z.string().optional(),
 });
 export type OcrRes = z.infer<typeof OcrResSchema>;
 
@@ -286,6 +290,8 @@ export const CreateEntryReqSchema = z.object({
   source: EntrySourceSchema,
   syllables: SyllablesSchema,
   variety: VarietySchema.default("zh-Hant"),
+  /** source ask (history) — links the entry to its photo context for follow-ups */
+  askId: z.string().optional(),
 });
 export type CreateEntryReq = z.infer<typeof CreateEntryReqSchema>;
 
@@ -315,6 +321,7 @@ export const EntrySchema = z.object({
   srsBox: z.number().int().min(0).max(5).default(0),
   srsDue: z.string().nullable(),
   srsStreak: z.number().int().default(0),
+  askId: z.string().nullable().default(null),
 });
 export type Entry = z.infer<typeof EntrySchema>;
 

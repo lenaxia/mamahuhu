@@ -242,7 +242,7 @@ export class LlmTranslationService implements TranslationService {
   async glossZh(text: string): Promise<Result<string>> {
     const res = await this.chat.complete(
       [
-        { role: "system", content: "Translate this Mandarin phrase into natural English. Reply with ONLY the translation on one line — no pinyin, no notes, no quotes." },
+        { role: "system", content: "Translate this Chinese phrase into natural English. It may be Mandarin OR colloquial Cantonese (口語, e.g. 唔係/嘅/咗) — handle both. Reply with ONLY the translation on one line — no pinyin, no notes, no quotes." },
         { role: "user", content: text },
       ],
       { model: this.model, temperature: 0.2, maxTokens: 120 },
@@ -250,6 +250,19 @@ export class LlmTranslationService implements TranslationService {
     if (!res.ok) return res;
     const gloss = res.value.trim().replace(/^["'「」]+|["'「」]+$/g, "");
     return gloss ? { ok: true, value: gloss } : { ok: false, error: "empty gloss" };
+  }
+
+  async fullZh(text: string): Promise<Result<string>> {
+    const res = await this.chat.complete(
+      [
+        { role: "system", content: `Translate this Chinese text completely into natural English. The text may be Mandarin OR colloquial Cantonese (口語). It may contain line breaks from a photo: use judgment — join lines that form one sentence, keep separate items (bullets, lists, slogans) separate on their own lines. Reply with ONLY the translation, no notes, no Chinese.` },
+        { role: "user", content: text },
+      ],
+      { model: this.model, temperature: 0.2, maxTokens: 400 },
+    );
+    if (!res.ok) return res;
+    const full = res.value.trim().replace(/^["'「」]+|["'「」]+$/g, "");
+    return full ? { ok: true, value: full } : { ok: false, error: "empty translation" };
   }
 
   async answerZh(text: string): Promise<Result<string>> {
@@ -267,6 +280,10 @@ export class LlmTranslationService implements TranslationService {
 }
 
 export class MockTranslationService implements TranslationService {
+  async fullZh(text: string): Promise<Result<string>> {
+    return { ok: true, value: `MOCK full translation of: ${text.slice(0, 40)}` };
+  }
+
   async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
     const t = text.toLowerCase();
     if (opts?.variety === "zh-HK") {

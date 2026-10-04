@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS entries (
   srs_due TEXT,
   srs_streak INTEGER NOT NULL DEFAULT 0,
   review_count INTEGER NOT NULL DEFAULT 0,
+  ask_id TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_entries_user ON entries(user_id, created_at);
@@ -138,6 +139,7 @@ export async function ensureSchema(sql: Sql): Promise<void> {
     "ALTER TABLE entries ADD COLUMN srs_box INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE entries ADD COLUMN srs_due TEXT",
     "ALTER TABLE entries ADD COLUMN srs_streak INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE entries ADD COLUMN ask_id TEXT",
     "ALTER TABLE entries ADD COLUMN review_count INTEGER NOT NULL DEFAULT 0",
   ]) {
     await sql.run(col).catch(() => undefined); // column already exists

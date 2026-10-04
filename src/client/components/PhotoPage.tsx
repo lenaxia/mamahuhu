@@ -14,11 +14,13 @@ export function PhotoPage({
   w,
   h,
   page,
+  askId,
 }: {
   photoUrl: string;
   w: number;
   h: number;
   page: OcrPage;
+  askId?: string;
 }): React.JSX.Element {
   const [ocrWord, setOcrWord] = useState<z.infer<typeof OcrWordSchema> | null>(null);
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
@@ -247,7 +249,7 @@ export function PhotoPage({
                     >
                       <IconClose className="h-4 w-4" />
                     </button>
-                    <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} />
+                    <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} askId={askId} />
                   </div>
                 </div>
               );
@@ -312,7 +314,7 @@ export function PhotoPage({
               }),
             )}
           </div>
-          {ocrWord && <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} />}
+          {ocrWord && <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} askId={askId} />}
         </>
       )}
     </div>

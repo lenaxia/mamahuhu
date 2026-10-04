@@ -53,6 +53,7 @@ export function ResultCard({ card }: { card: TranslateRes }) {
         source: "en-translate",
         syllables: canto ? sense.casual.syllables : syllables,
         variety,
+        ...(card.askId ? { askId: card.askId } : {}),
       });
       setSaved(true);
       show(res.duplicate ? "Already saved" : "Saved");

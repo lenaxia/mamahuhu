@@ -4,6 +4,7 @@ import type { Identify, OcrPage, OcrRes } from "../../shared/api";
 import { marksToNumbered, numberedToBpmf } from "../../shared/bpmf";
 import { api, ApiError } from "../api";
 import { HanziWordCard, FollowUpBox } from "./Cards";
+import { CopyButton } from "./CopyButton";
 import { PhotoPage } from "./PhotoPage";
 import { IconClose } from "./Icons";
 import { useToast } from "./Toast";
@@ -39,6 +40,7 @@ function IdentifyCard({ identify, onRefine, askId }: { identify: Identify; onRef
         source: "ocr",
         syllables,
         variety: "zh-Hant",
+        ...(askId ? { askId } : {}),
       });
       setSaved(true);
       show(res.duplicate ? "Already saved" : "Saved");
@@ -223,7 +225,7 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
       )}
 
       {/* image always displays — with or without detected text */}
-      <PhotoPage photoUrl={pageUrl} w={w} h={h} page={page} />
+      <PhotoPage photoUrl={pageUrl} w={w} h={h} page={page} askId={ocrResult.askId} />
 
       {tags && tags.length > 0 && (
         <div className="space-y-2">
@@ -252,6 +254,18 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
           {openTag !== null && tags[openTag] && (
             <IdentifyCard identify={tags[openTag]!} onRefine={() => setMarkMode(true)} askId={ocrResult.askId} />
           )}
+        </div>
+      )}
+
+      {ocrResult.fullTranslation && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-400">full translation</span>
+            <CopyButton text={ocrResult.fullTranslation} className="h-7 w-7" />
+          </div>
+          <p className="whitespace-pre-line rounded-xl bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-200">
+            {ocrResult.fullTranslation}
+          </p>
         </div>
       )}
 

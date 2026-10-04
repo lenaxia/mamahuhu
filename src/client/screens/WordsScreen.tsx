@@ -6,6 +6,7 @@ import { Segmented } from "../components/Segmented";
 import { Sheet } from "../components/Sheet";
 import { IconPlay, IconTrash } from "../components/Icons";
 import { CopyButton } from "../components/CopyButton";
+import { FollowUpBox } from "../components/Cards";
 import { AnnotatedText } from "../components/AnnotatedText";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
@@ -148,6 +149,15 @@ export function WordsScreen(): React.JSX.Element {
                 rows={3}
                 placeholder="e.g. he says this when…"
                 className="w-full rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-3 text-sm outline-none focus:border-amber-500"
+              />
+            </div>
+            <div className="pt-1">
+              <label className="mb-1 block text-xs uppercase tracking-wide text-neutral-400">ask more</label>
+              <FollowUpBox
+                hanzi={open.traditional}
+                gloss={open.english}
+                variety={open.variety === "zh-HK" ? "zh-HK" : "zh-Hant"}
+                {...(open.askId ? { askId: open.askId } : {})}
               />
             </div>
           </div>
