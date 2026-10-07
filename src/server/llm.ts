@@ -651,7 +651,9 @@ export class GatewayOcrService implements OcrService {
         `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Find every block of Han text (ignore bopomofo/zhuyin annotation symbols). Return ONLY valid JSON, no prose: {"items":[{"text":"…","from":[x1,y1],"to":[x2,y2]}]}
 - from = point where the text block STARTS (start of its baseline); to = where it ENDS. Coordinates on a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis).
 - The from→to vector must run ALONG the text's own axis: horizontal text → left-to-right vector; vertical text → top-to-bottom; diagonal text → its actual diagonal. A single standalone word is its own small block.
-- TEXT ON A CURVE: split it into SHORT consecutive blocks (3-5 characters each), each following the LOCAL direction of the curve at that point.
+- LONG STRAIGHT lines (vertical columns included) must be ONE single block covering the ENTIRE line, first character to last — never split, never stop early.
+- LONG STRAIGHT lines (vertical columns included) must be ONE single block covering the ENTIRE line, first character to last — never split, never stop early.
+- TEXT ON A CURVE: split it into SHORT consecutive blocks (3-5 characters each), each following the LOCAL direction of the curve at that point. Split ONLY text that physically curves.
 - Group characters that belong to one word or short phrase into a SINGLE block (entries in a word cloud are words, not individual characters); emit a standalone single character only when it is truly isolated.
 - Text always reads from→to. Transcribe each block EXACTLY ONCE — never repeat text.`;
       const user = [

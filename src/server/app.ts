@@ -594,6 +594,15 @@ async function buildPhrase(
       // 60° cell halves its width and shrink-to-fit crushes the font
       return [Math.round(cx - half), Math.round(cy - half), Math.round(cx + half), Math.round(cy + half)];
     };
+    // median char pitch across vector lines — handwriting has uniform glyph
+    // size; lines whose own pitch is within 30% of the median snap to it, so
+    // chips render one consistent size (genuine outliers like word clouds keep theirs)
+    const vecPitches = res.value.lines
+      .filter((l) => l.from && l.to)
+      .map((l) => Math.hypot(l.to![0]! - l.from![0]!, l.to![1]! - l.from![1]!) / Math.max(1, [...l.text].length))
+      .sort((a, b) => a - b);
+    const medianPitch = vecPitches.length ? vecPitches[Math.floor(vecPitches.length / 2)]! : 0;
+
     for (const line of res.value.lines) {
       const dir = lineDir(line.dir, line.box, [...line.text].length);
       lineTexts.push(line.text);
@@ -606,10 +615,19 @@ async function buildPhrase(
       // carries the line angle so the overlay renders rotated to the text
       let charCursor = 0;
       const lineAngle = line.angle;
-      const along: undefined | ((s: number, e: number) => [number, number, number, number]) =
-        line.from && line.to
-          ? (s, e) => cellAlong(line.from!, line.to!, Math.hypot(line.to![0]! - line.from![0]!, line.to![1]! - line.from![1]!), s, e, totalChars)
-          : undefined;
+      let along: undefined | ((s: number, e: number) => [number, number, number, number]);
+      if (line.from && line.to) {
+        const rawLen = Math.hypot(line.to[0]! - line.from[0]!, line.to[1]! - line.from[1]!);
+        const ownPitch = rawLen / Math.max(1, totalChars);
+        // snap to median when close: uniform glyphs AND extends undershot vectors
+        const len = medianPitch > 0 && Math.abs(ownPitch - medianPitch) / medianPitch <= 0.3
+          ? medianPitch * totalChars
+          : rawLen;
+        const ux = (line.to[0]! - line.from[0]!) / rawLen;
+        const uy = (line.to[1]! - line.from[1]!) / rawLen;
+        const to: [number, number] = [line.from[0]! + ux * len, line.from[1]! + uy * len];
+        along = (s: number, e: number) => cellAlong(line.from!, to, len, s, e, totalChars);
+      }
       for (const seg of segments) {
         const hit = lookup(seg);
         const segLen = [...seg].length;
