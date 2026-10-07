@@ -542,7 +542,8 @@ CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the 
   (wide-short, dir "h") even though the banner itself is tall. Do not label horizontal lines "v".
 - Only text physically printed as top-to-bottom columns (right side of traditional signs, 竖排) gets dir "v" with a tall-narrow box. ${
           dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
-        }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.`;
+        }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.
+TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emitted — no duplicated lines, no re-reading of the same column at a different offset. Scan the page once, top to bottom (for vertical layouts: right column to left).`;
       const user = [
         { type: "text", text: "Transcribe the Chinese text, one item per line, with boxes." },
         { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
