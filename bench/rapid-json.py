@@ -19,5 +19,8 @@ items = []
 for r in (result or []):
     box, text, score = r[0], r[1], r[2]
     xs = [p[0] for p in box]; ys = [p[1] for p in box]
-    items.append({"box": [min(xs), min(ys), max(xs), max(ys)], "text": text, "score": round(float(score), 3)})
+    bx = [min(xs), min(ys), max(xs), max(ys)]
+    if s < 1.0:  # boxes come from the SCALED image — return to original pixel space
+        bx = [v / s for v in bx]
+    items.append({"box": [round(v) for v in bx], "text": text, "score": round(float(score), 3)})
 print(json.dumps({"items": items, "scaled": s < 1.0, "w": w, "h": h}))

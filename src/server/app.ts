@@ -302,6 +302,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
         script: process.env.OCR_SCRIPT ?? "scripts/rapid-json.py",
       }),
       ocr,
+      { base, key, model: visionModel },
     );
   }
   const describe: DescribeService = mock

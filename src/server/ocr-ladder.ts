@@ -58,20 +58,99 @@ export function classicalLines(items: RapidItem[]): OcrLine[] {
   return [...horizontal, ...vertical];
 }
 
+
+const CENSUS_SYSTEM = `You are a text-region census. List EVERY region of the image that contains ANY text, no matter its angle, curve, or legibility. Do NOT transcribe anything. Return ONLY valid JSON:
+{"regions":[{"box":[x1,y1,x2,y2]}]}
+Boxes on a 0-1000 grid (0,0 = top-left). One region per contiguous text block.`;
+
+const RECOGNIZE_SYSTEM = "Transcribe ALL Chinese text visible in the image, in reading order. Reply with ONLY the transcription — no JSON, no notes.";
+
+interface Box { x1: number; y1: number; x2: number; y2: number }
+
 export class LadderOcrService implements OcrService {
-  constructor(private rapid: RapidOcrService, private llm: OcrService) {}
+  constructor(private rapid: RapidOcrService, private llm: OcrService, private chatCfg?: { base: string; key: string; model: string }) {}
   available(): boolean { return this.llm.available(); }
   /** which rung served the last call (diagnostics/tests) */
   public lastServedBy: "classical" | "llm" = "classical";
 
+  private async chat(system: string, b64: string, maxTokens: number): Promise<string> {
+    if (!this.chatCfg) throw new Error("chat cfg missing");
+    const res = await fetch(`${this.chatCfg.base}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.chatCfg.key}` },
+      body: JSON.stringify({
+        model: this.chatCfg.model, temperature: 0, max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: [
+            { type: "text", text: system === CENSUS_SYSTEM ? "List the text regions." : "Transcribe." },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
+          ] },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`gateway ${res.status}`);
+    return ((await res.json()) as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content ?? "";
+  }
+
+  /** census pass: LLM lists text regions; returns boxes classical left unexplained */
+  async censusGaps(bytes: Uint8Array, items: RapidItem[], w: number, h: number): Promise<Box[]> {
+    const raw = await this.chat(CENSUS_SYSTEM, Buffer.from(bytes).toString("base64"), 1200);
+    const regions: Box[] = [];
+    for (const m of raw.matchAll(/\{[^{}]*\}/g)) {
+      try {
+        const o = JSON.parse(m[0]) as { box?: unknown };
+        const b = Array.isArray(o.box) ? o.box.map(Number) : null;
+        if (b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]! && b.every((n) => n >= -60 && n <= 1060)) {
+          regions.push({ x1: Math.round(b[0]! / 1000 * w), y1: Math.round(b[1]! / 1000 * h), x2: Math.round(b[2]! / 1000 * w), y2: Math.round(b[3]! / 1000 * h) });
+        }
+      } catch { /* skip */ }
+    }
+    return regions.filter((r) => !covered(r, items));
+  }
+
+  /** bounded crop recognition for census gaps (plain text out — nothing to loop in) */
+  private async cropRecognize(bytes: Uint8Array, r: Box, w: number, h: number): Promise<string> {
+    const sharp = (await import("sharp")).default;
+    const padX = Math.round((r.x2 - r.x1) * 0.15) + 6;
+    const padY = Math.round((r.y2 - r.y1) * 0.15) + 6;
+    const left = Math.max(0, r.x1 - padX);
+    const top = Math.max(0, r.y1 - padY);
+    const width = Math.min(w - left, r.x2 - r.x1 + 2 * padX);
+    const height = Math.min(h - top, r.y2 - r.y1 + 2 * padY);
+    const scale = Math.min(3, Math.max(1, 600 / Math.max(width, height)));
+    const crop = await sharp(Buffer.from(bytes)).extract({ left, top, width, height }).resize(Math.round(width * scale), Math.round(height * scale)).png().toBuffer();
+    const raw = await this.chat(RECOGNIZE_SYSTEM, crop.toString("base64"), 400);
+    return raw.replace(/```[a-z]*|```/gi, "").trim();
+  }
+
   async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
     try {
       const bytes = new Uint8Array(await image.arrayBuffer());
-      const { items } = await this.rapid.extract(bytes);
+      const { items, w, h } = await this.rapid.extract(bytes);
       if (classicalSufficient(items)) {
         this.lastServedBy = "classical";
         const lines = classicalLines(items);
-        if (lines.length) return { ok: true, value: { lines } };
+        if (lines.length) {
+          // CENSUS verify: close the coverage hole — LLM lists regions, code
+          // compares, unexplained regions get crop-recognized and merged
+          if (this.chatCfg) {
+            try {
+              const gaps = await this.censusGaps(bytes, items, w, h);
+              const classicalText = items.map((i) => i.text).join("");
+              for (const g of gaps.slice(0, 12)) {
+                const text = await this.cropRecognize(bytes, g, w, h);
+                if (text && /\p{Script=Han}/u.test(text) && !classicalText.includes(text.replace(/\s+/g, ""))) {
+                  const tall = g.y2 - g.y1 > (g.x2 - g.x1) * 1.3 && [...text].length > 1;
+                  lines.push({ text, box: [g.x1, g.y1, g.x2, g.y2], dir: tall ? "v" : "h" });
+                }
+              }
+            } catch {
+              /* census is best-effort — classical result stands alone */
+            }
+          }
+          return { ok: true, value: { lines } };
+        }
       }
     } catch {
       /* classical unavailable/erroring → fall through to the LLM rung */
@@ -79,4 +158,17 @@ export class LadderOcrService implements OcrService {
     this.lastServedBy = "llm";
     return this.llm.extract(image);
   }
+}
+
+function covered(regionPx: Box, items: RapidItem[]): boolean {
+  const rw = regionPx.x2 - regionPx.x1;
+  const rh = regionPx.y2 - regionPx.y1;
+  if (rw <= 0 || rh <= 0) return true;
+  let interSum = 0;
+  for (const it of items) {
+    const ix = Math.max(0, Math.min(regionPx.x2, it.box[2]) - Math.max(regionPx.x1, it.box[0]));
+    const iy = Math.max(0, Math.min(regionPx.y2, it.box[3]) - Math.max(regionPx.y1, it.box[1]));
+    interSum += ix * iy;
+  }
+  return interSum / (rw * rh) >= 0.5;
 }
