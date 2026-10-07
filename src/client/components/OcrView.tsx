@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { z } from "zod";
+import { OcrWordSchema } from "../../shared/api";
 import type { Identify, OcrPage, OcrRes } from "../../shared/api";
 import { marksToNumbered, numberedToBpmf } from "../../shared/bpmf";
 import { api, ApiError } from "../api";
