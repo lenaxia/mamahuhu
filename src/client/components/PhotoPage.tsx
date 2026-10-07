@@ -44,9 +44,14 @@ export function PhotoPage({
     };
   }, [photoUrl, w]);
 
+  // pan/zoom bounds come from the RENDERED image — the w/h props can be 0
+  // (fresh photo asks before dims load), which froze zoom at top-left
+  const rendered = () => {
+    const el = imgRef.current;
+    return { W: el?.clientWidth || w * imgScale || 1, H: el?.clientHeight || h * imgScale || 1 };
+  };
   const clamp = (v: { s: number; x: number; y: number }) => {
-    const W = (w * imgScale) || 1;
-    const H = (h * imgScale) || 1;
+    const { W, H } = rendered();
     const maxX = Math.min(0, W * (1 - v.s));
     const maxY = Math.min(0, H * (1 - v.s));
     return { s: v.s, x: Math.min(0, Math.max(maxX, v.x)), y: Math.min(0, Math.max(maxY, v.y)) };
@@ -55,8 +60,7 @@ export function PhotoPage({
   /** zoom keeping container-point (px,py) fixed */
   const zoomTo = (s2: number, px = -1, py = -1) => {
     setView((v) => {
-      const W = w * imgScale || 1;
-      const H = h * imgScale || 1;
+      const { W, H } = rendered();
       const fx = px < 0 ? W / 2 : px;
       const fy = py < 0 ? H / 2 : py;
       const ratio = s2 / v.s;

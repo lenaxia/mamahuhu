@@ -590,7 +590,9 @@ async function buildPhrase(
       const cy = f[1] + uy * (s + (e - s) / 2) * len;
       const half = ((e - s) * len) / 2;
       void chars;
-      return [Math.round(cx - Math.abs(ux) * half), Math.round(cy - Math.abs(uy) * half), Math.round(cx + Math.abs(ux) * half), Math.round(cy + Math.abs(uy) * half)];
+      // SQUARE char cell (side = span along the axis) — axis-projecting a
+      // 60° cell halves its width and shrink-to-fit crushes the font
+      return [Math.round(cx - half), Math.round(cy - half), Math.round(cx + half), Math.round(cy + half)];
     };
     for (const line of res.value.lines) {
       const dir = lineDir(line.dir, line.box, [...line.text].length);
