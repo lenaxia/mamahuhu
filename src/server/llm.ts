@@ -525,96 +525,16 @@ export class UnavailableStt implements SttService {
   }
 }
 
-/** Detects the degenerate-repetition failure mode GEOMETRICALLY, so genuine
- *  repeated text (refrains, drilled characters) survives:
- *  - clone marches: >=3 occurrences of a text whose boxes step by a near-
- *    constant vector (measured +30x/+60y marching off-grid) → keep the first
- *  - phantom boxes: coordinates escaping the 0-1000 grid by >60 units → drop
- *  - boxless duplicates: cap at 3 (loops emit 5-20; real pages rarely repeat 4×)
- */
-/** Salvage complete items from a TRUNCATED JSON response (finish_reason=length):
- *  dense pages legitimately exceed the token budget mid-list; the complete
- *  items before the cut are still good OCR. */
-export function scrapeOcrItems(raw: string): { text?: unknown; box?: unknown; dir?: unknown }[] {
-  const out: { text?: unknown; box?: unknown; dir?: unknown }[] = [];
-  for (const m of raw.matchAll(/\{[^{}]*\}/g)) {
-    const blob = m[0];
-    const text = blob.match(/"text"\s*:\s*"([^"]*)"/);
-    if (!text || !text[1]!.trim()) continue;
-    const boxM = blob.match(/"box"\s*:\s*\[([^\]]*)\]/);
-    const dirM = blob.match(/"dir"\s*:\s*"(h|v)"/);
-    out.push({
-      text: text[1],
-      ...(boxM ? { box: boxM[1]!.split(",").map((n) => Number(n.trim())) } : {}),
-      ...(dirM ? { dir: dirM[1] } : {}),
-    });
-  }
-  return out;
-}
-
-export function healRepetition(lines: OcrLine[]): OcrLine[] {
-  const inGrid = lines.filter((ln) => {
-    if (!ln.box) return true;
-    const [x1, y1, x2, y2] = ln.box;
-    return x1 >= -60 && y1 >= -60 && x2 <= 1060 && y2 <= 1060;
-  });
-  const byText = new Map<string, { ln: OcrLine; i: number }[]>();
-  inGrid.forEach((ln, i) => {
-    const list = byText.get(ln.text) ?? [];
-    list.push({ ln, i });
-    byText.set(ln.text, list);
-  });
-  const drop = new Set<number>();
-  for (const occurrences of byText.values()) {
-    if (occurrences.length >= 3 && occurrences.every((o) => o.ln.box)) {
-      let steps = 0;
-      for (let k = 2; k < occurrences.length; k++) {
-        const a = occurrences[k - 2]!.ln.box!;
-        const b = occurrences[k - 1]!.ln.box!;
-        const c = occurrences[k]!.ln.box!;
-        const d1 = [b[0] - a[0], b[1] - a[1]];
-        const d2 = [c[0] - b[0], c[1] - b[1]];
-        const near = Math.abs(d1[0]! - d2[0]!) <= 15 && Math.abs(d1[1]! - d2[1]!) <= 15 && (Math.abs(d1[0]!) > 0 || Math.abs(d1[1]!) > 0);
-        if (near) steps++;
-      }
-      if (steps >= 1) occurrences.slice(1).forEach((o) => drop.add(o.i)); // marching clone chain
-    } else if (occurrences.length > 3) {
-      occurrences.slice(3).forEach((o) => drop.add(o.i)); // boxless flood cap
-    }
-  }
-  return inGrid.filter((_, i) => !drop.has(i));
-}
-
 export class GatewayOcrService implements OcrService {
   constructor(private cfg: { base: string; key: string; model: string }) {}
   available(): boolean { return true; }
-
-  /** items (parsed or scraped) -> healed lines; skew pulled from raw when not in items */
-  private buildLines(items: { text?: unknown; box?: unknown; dir?: unknown }[], raw: string, dims: { w: number; h: number } | null): { lines: OcrLine[]; skew?: number } {
-    const lines: OcrLine[] = [];
-    for (const it of items) {
-      if (typeof it.text !== "string" || !it.text.trim()) continue;
-      const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
-      const box =
-        b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
-          ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
-          : undefined;
-      const dir = it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined;
-      lines.push({ text: it.text.trim(), box, dir });
-    }
-    const deduped = healRepetition(lines).slice(0, 60);
-    const healed = dims ? normalizeBoxes(deduped, dims.w, dims.h) : deduped;
-    const skewM = raw.match(/"skew"\s*:\s*(-?\d+(?:\.\d+)?)/);
-    const skew = skewM && Math.abs(Number(skewM[1])) <= 90 ? Number(skewM[1]) : undefined;
-    return { lines: healed, ...(skew !== undefined ? { skew } : {}) };
-  }
   async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
     try {
       const bytes = new Uint8Array(await image.arrayBuffer());
       const b64 = Buffer.from(bytes).toString("base64");
       const dims = parseImageDims(bytes);
       const system =
-        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"skew":<number>,"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. "skew" = degrees the whole image must be rotated CLOCKWISE so the text lines become horizontal (0 when already upright; e.g. an over-the-shoulder shot of a diagonal letter ≈ 30-60). dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style).
+        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style).
 CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the poster's orientation:
 - A horizontal line of N characters has a WIDE-SHORT box (width ≈ N × char height) and dir "h".
 - A vertical column of N characters has a TALL-NARROW box (height ≈ N × char width) and dir "v".
@@ -622,8 +542,7 @@ CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the 
   (wide-short, dir "h") even though the banner itself is tall. Do not label horizontal lines "v".
 - Only text physically printed as top-to-bottom columns (right side of traditional signs, 竖排) gets dir "v" with a tall-narrow box. ${
           dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
-        }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.
-TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emitted — no duplicated lines, no re-reading of the same column at a different offset. Scan the page once, top to bottom (for vertical layouts: right column to left).`;
+        }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.`;
       const user = [
         { type: "text", text: "Transcribe the Chinese text, one item per line, with boxes." },
         { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
@@ -637,43 +556,43 @@ TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emi
           body: JSON.stringify({
             model: this.cfg.model,
             temperature: 0,
-            max_tokens: 6000,
+            max_tokens: 3000,
             messages: attempt === 0
               ? [{ role: "system", content: system }, { role: "user", content: user }]
               : [
                   { role: "system", content: system },
                   { role: "user", content: user },
                   { role: "assistant", content: raw.slice(0, 3000) },
-                  { role: "user", content: "That response was truncated or repeated itself. Return ONLY the JSON object {\"items\":[…]} — no prose, no code fences, each line EXACTLY once, stop after the last line of text." },
+                  { role: "user", content: "That was not the JSON format requested. Return ONLY the JSON object {\"items\":[…]} — no prose, no code fences." },
                 ],
           }),
         });
         if (!res.ok) return { ok: false, error: `ocr gateway ${res.status}: ${(await res.text()).slice(0, 200)}` };
-        const data = (await res.json()) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
-        const choice = data.choices?.[0];
-        raw = choice?.message?.content ?? "";
+        const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+        raw = data.choices?.[0]?.message?.content ?? "";
         if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
-        // truncation → the JSON cannot be balanced, but the complete items
-        // before the cut are good — salvage them, retry only if none
-        if (choice?.finish_reason === "length") {
-          const salvaged = scrapeOcrItems(raw);
-          if (salvaged.length) return { ok: true, value: this.buildLines(salvaged, raw, dims) };
-          continue;
-        }
 
-        const parsed = extractJson(raw) as { skew?: unknown; items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
+        const lines: OcrLine[] = [];
+        const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
         if (parsed?.items?.length) {
-          const built = this.buildLines(parsed.items, raw, dims);
-          if (built.lines.length) return { ok: true, value: built };
+          for (const it of parsed.items) {
+            if (typeof it.text !== "string" || !it.text.trim()) continue;
+            const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
+            const box =
+              b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
+                ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
+                : undefined;
+            const dir = it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined;
+            lines.push({ text: it.text.trim(), box, dir });
+          }
+          if (lines.length) {
+            const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
+            return { ok: true, value: { lines: healed } };
+          }
         }
       }
 
-      // last resort: scrape any complete items out of unparseable JSON
-      if (/\s*\{/ .test(raw) || raw.includes('"items"')) {
-        const salvaged = scrapeOcrItems(raw);
-        if (salvaged.length) return { ok: true, value: this.buildLines(salvaged, raw, dims) };
-        return { ok: false, error: "ocr returned unusable JSON (repetition/truncation)" };
-      }
+      // final fallback: plain-text lines, no boxes
       const plain = raw
         .split("\n")
         .map((l) => l.trim())
@@ -896,20 +815,10 @@ export class MockFollowUpService implements FollowUpService {
 }
 
 export class MockOcrService implements OcrService {
-  private skewedSeen = new Set<string>();
   available(): boolean { return true; }
-  async extract(image: Blob): Promise<Result<{ lines: OcrLine[]; skew?: number }>> {
+  async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
     // mock convention: uploads named plant*/blank* are textless (subject photos)
     const name = (image as File).name ?? "";
-    // uploads named skew*: first pass reports a 45° diagonal (fragmented text),
-    // second pass (after the server deskews) returns the clean line
-    if (/skew/i.test(name)) {
-      if (!this.skewedSeen.has(name)) {
-        this.skewedSeen.add(name);
-        return { ok: true, value: { lines: [{ text: "長信王之子隨元" }, { text: "子隨元" }], skew: 45 } };
-      }
-      return { ok: true, value: { lines: [{ text: "密呈太傅大人", box: [20, 30, 560, 110], dir: "h" }] } };
-    }
     if (/plant|blank|textless/i.test(name)) return { ok: true, value: { lines: [] } };
     // vertical: uploads named vertical* contain a top-to-bottom column
     if (/vertical/i.test(name)) {

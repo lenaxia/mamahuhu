@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { z } from "zod";
-import { OcrWordSchema } from "../../shared/api";
 import type { Identify, OcrPage, OcrRes } from "../../shared/api";
 import { marksToNumbered, numberedToBpmf } from "../../shared/bpmf";
 import { api, ApiError } from "../api";
@@ -88,44 +87,6 @@ function IdentifyCard({ identify, onRefine, askId }: { identify: Identify; onRef
 }
 
 /** Circle-to-refine: draw over the photo, the bbox crop is re-identified. */
-function WordList({
-  words,
-  askId,
-  onSaved,
-}: {
-  words: z.infer<typeof OcrWordSchema>[];
-  askId?: string;
-  onSaved: (t: string) => void;
-}): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false);
-  // dense prose (letters, chapters) re-reads columns and repeats phrases —
-  // dedupe to one card per word; the overlay chips keep per-occurrence
-  const seen = new Set<string>();
-  const unique = words.filter((w) => {
-    const key = w.traditional + "|" + w.english;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  const LIMIT = 6;
-  const shown = expanded ? unique : unique.slice(0, LIMIT);
-  return (
-    <div className="space-y-2">
-      <span className="text-xs uppercase tracking-wide text-neutral-400">words{unique.length < words.length ? ` · ${unique.length} unique` : ""}</span>
-      <div className="space-y-2">
-        {shown.map((wd, i) => (
-          <HanziWordCard key={wd.traditional + i} word={wd} askId={askId} onSaved={onSaved} />
-        ))}
-      </div>
-      {unique.length > LIMIT && (
-        <button onClick={() => setExpanded(!expanded)} className="w-full rounded-xl border border-neutral-200 dark:border-neutral-800 py-2.5 text-xs font-semibold text-neutral-500">
-          {expanded ? "show fewer" : `show all ${unique.length} words`}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function MarkOverlay({ photoUrl, onCancel, onCrop }: { photoUrl: string; onCancel: () => void; onCrop: (blob: Blob) => void }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -307,11 +268,14 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
       )}
 
       {page.lines.length > 0 && (
-        <WordList
-          words={page.lines.flatMap((l) => l.words)}
-          askId={ocrResult.askId}
-          onSaved={(t) => setSavedWords((s) => new Set(s).add(t))}
-        />
+        <div className="space-y-2">
+          <span className="text-xs uppercase tracking-wide text-neutral-400">words</span>
+          <div className="space-y-2">
+            {page.lines.flatMap((l) => l.words).map((wd, i) => (
+              <HanziWordCard key={wd.traditional + i} word={wd} askId={ocrResult.askId} onSaved={(t) => setSavedWords((s) => new Set(s).add(t))} />
+            ))}
+          </div>
+        </div>
       )}
 
       {page.lines.length === 0 && !tags?.length && (
