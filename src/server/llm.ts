@@ -581,7 +581,48 @@ export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | n
       lines.push({ text, box: [b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number], dir: it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined });
     }
   }
-  return lines;
+  return chainContinuations(lines);
+}
+
+/** The model sometimes emits a line's TAIL as a separate item whose from ==
+ *  the parent line's to (measured exactly on the diagonal letter fixture).
+ *  Chain those continuations so the transcription isn't presented truncated. */
+function chainContinuations(lines: OcrLine[]): OcrLine[] {
+  const merged = true;
+  let out = [...lines];
+  while (merged) {
+    let didMerge = false;
+    outer: for (let i = 0; i < out.length; i++) {
+      const a = out[i]!;
+      if (!a.to || !a.from) continue;
+      const pitchA = Math.hypot(a.to[0] - a.from[0], a.to[1] - a.from[1]) / Math.max(1, [...a.text].length);
+      for (let j = 0; j < out.length; j++) {
+        if (i === j) continue;
+        const b = out[j]!;
+        if (!b.from || !b.to) continue;
+        const gap = Math.hypot(b.from[0] - a.to[0], b.from[1] - a.to[1]);
+        // continuations measured EXACT (gap 0); keep tolerance well under one
+        // char pitch so dense layouts (word clouds) never chain neighbors
+        if (gap <= pitchA * 0.8) {
+          // continuation: same axis direction too (within 15°)
+          const angA = Math.atan2(a.to[1] - a.from[1], a.to[0] - a.from[0]);
+          const angB = Math.atan2(b.to[1] - b.from[1], b.to[0] - b.from[0]);
+          let dAng = Math.abs(angA - angB) * 180 / Math.PI;
+          if (dAng > 180) dAng = 360 - dAng;
+          if (dAng <= 15) {
+            const pitch = Math.hypot(b.to[0] - b.from[0], b.to[1] - b.from[1]) / Math.max(1, [...b.text].length);
+            out[i] = { ...a, text: a.text + b.text, to: b.to, box: [Math.min(a.box![0], b.box![0]), Math.min(a.box![1], b.box![1]), Math.max(a.box![2], b.box![2]), Math.max(a.box![3], b.box![3])] };
+            out.splice(j, 1);
+            void pitch;
+            didMerge = true;
+            break outer;
+          }
+        }
+      }
+    }
+    if (!didMerge) break;
+  }
+  return out;
 }
 
 export class GatewayOcrService implements OcrService {

@@ -39,7 +39,7 @@ export const FIXTURES = [
     known: ["舉頭望明月", "低頭思故鄉"], minBlocks: 1, maxDupes: 0 },
 ];
 
-async function ask(system, file, maxTokens = 4000): Promise<string> {
+async function ask(system: string, file: string, maxTokens = 4000): Promise<string> {
   const b64 = readFileSync(file).toString("base64");
   const mime = file.endsWith(".png") ? "image/png" : "image/jpeg";
   const res = await fetch(`${BASE}/chat/completions`, {

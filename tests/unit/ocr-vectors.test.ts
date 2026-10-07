@@ -68,9 +68,40 @@ describe("OCR baseline replay (real recorded model outputs, CI-safe)", () => {
   });
 
   for (const [name, rec] of Object.entries(baseline)) {
-    it(`${name}: recorded raw output parses to ≥70% of recorded block count`, () => {
+    it(`${name}: recorded raw conserves ≥95% of characters (chaining merges blocks, never text)`, () => {
       const lines = parseOcrVectors(rec.raw, null);
-      expect(lines.length, `raw: ${rec.raw.slice(0, 120)}`).toBeGreaterThanOrEqual(Math.floor(rec.blocks * 0.7));
+      if (rec.blocks === 0) {
+        // recorded corpse (truncated/unparseable) — parser must fail gracefully, not emit junk
+        expect(lines.length).toBe(0);
+        return;
+      }
+      const chars = lines.reduce((s, l) => s + [...l.text].length, 0);
+      const rawChars = (JSON.stringify(rec.raw).match(/[\u3400-\u9fff\uf900-\ufaff]/g) ?? []).length;
+      expect(chars, `raw: ${rec.raw.slice(0, 120)}`).toBeGreaterThanOrEqual(Math.floor(rawChars * 0.95));
     });
   }
+});
+
+describe("chaining (continuation fragments)", () => {
+  it("merges a tail fragment whose from == the parent line's to (the diagonal-letter failure)", () => {
+    const raw = JSON.stringify({ items: [
+      { text: "十七年前魏嚴家將魏祁林", from: [482, 233], to: [691, 658] },
+      { text: "調兵虎符一事如", from: [691, 658], to: [839, 851] },
+      { text: "密呈太傅大人", from: [618, 201], to: [776, 484] },
+    ] });
+    const lines = parseOcrVectors(raw, null);
+    expect(lines).toHaveLength(2);
+    const joined = lines.find((l) => l.text.includes("十七年前"));
+    expect(joined?.text).toBe("十七年前魏嚴家將魏祁林調兵虎符一事如");
+    expect(joined?.to).toEqual([839, 851]);
+  });
+
+  it("does not chain unrelated parallel lines", () => {
+    const raw = JSON.stringify({ items: [
+      { text: "床前明月光", from: [100, 100], to: [500, 100] },
+      { text: "疑是地上霜", from: [100, 220], to: [500, 220] }, // parallel line, 120px away
+    ] });
+    const lines = parseOcrVectors(raw, null);
+    expect(lines).toHaveLength(2);
+  });
 });
