@@ -539,6 +539,52 @@ export function snapAngle(a: number): number {
  *  — or a bare top-level array (the model emits both), tolerating box-shaped
  *  items for robustness. Validated against bench/fixtures (8 geometry regimes).
  *  No text dedupe: repeated words are legitimate (word clouds). */
+/** Geometric clone healing: degenerate re-reads die, genuine repeats live.
+ *  - identical text at >=80%-overlapping boxes = physically impossible -> keep first
+ *  - marching chains (constant box step, the measured failure mode) -> keep first
+ *  - boxless floods cap at 3 (real pages rarely repeat a line 4x; loops emit 5-20) */
+export function healRepetition(lines: OcrLine[]): OcrLine[] {
+  const byText = new Map<string, { ln: OcrLine; i: number }[]>();
+  lines.forEach((ln, i) => {
+    const list = byText.get(ln.text) ?? [];
+    list.push({ ln, i });
+    byText.set(ln.text, list);
+  });
+  const drop = new Set<number>();
+  const overlap = (a: [number, number, number, number], b: [number, number, number, number]): number => {
+    const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+    const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+    const inter = ix * iy;
+    const union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
+    return union > 0 ? inter / union : 0;
+  };
+  for (const occ of byText.values()) {
+    if (occ.length < 2) continue;
+    const kept: { ln: OcrLine; i: number }[] = [];
+    for (const o of occ) {
+      const dupOfKept = kept.some((k) => k.ln.box && o.ln.box && overlap(k.ln.box, o.ln.box) >= 0.8);
+      if (dupOfKept) drop.add(o.i);
+      else kept.push(o);
+    }
+    if (kept.length >= 3 && kept.every((o) => o.ln.box)) {
+      let steps = 0;
+      for (let k = 2; k < kept.length; k++) {
+        const a = kept[k - 2]!.ln.box!;
+        const b = kept[k - 1]!.ln.box!;
+        const c = kept[k]!.ln.box!;
+        const d1 = [b[0] - a[0], b[1] - a[1]];
+        const d2 = [c[0] - b[0], c[1] - b[1]];
+        const near = Math.abs(d1[0]! - d2[0]!) <= 15 && Math.abs(d1[1]! - d2[1]!) <= 15 && (Math.abs(d1[0]!) > 0 || Math.abs(d1[1]!) > 0);
+        if (near) steps++;
+      }
+      if (steps >= 1) kept.slice(1).forEach((o) => drop.add(o.i));
+    } else if (kept.length > 3 && kept.some((o) => !o.ln.box)) {
+      kept.slice(3).forEach((o) => drop.add(o.i));
+    }
+  }
+  return lines.filter((_, i) => !drop.has(i));
+}
+
 export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | null): OcrLine[] {
   const parsed = extractJson(raw) as
     | { items?: { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown }[] }
@@ -610,7 +656,7 @@ export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | n
       lines.push({ text, box: [b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number], dir: it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined });
     }
   }
-  return chainContinuations(lines);
+  return healRepetition(chainContinuations(lines));
 }
 
 /** complete {...} item objects scraped from a truncated JSON list */

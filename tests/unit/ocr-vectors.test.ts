@@ -91,6 +91,29 @@ describe("truncation salvage", () => {
   });
 });
 
+describe("geometric clone healing (the 11× repeat failure)", () => {
+  it("collapses same-position re-reads — identical text, overlapping boxes", () => {
+    const items = Array.from({ length: 11 }, () => ({ text: "確為真品現此調兵虎符", box: [100, 200, 500, 260], from: [100, 220], to: [500, 220] }));
+    const lines = parseOcrVectors(JSON.stringify({ items }), null);
+    expect(lines).toHaveLength(1);
+  });
+
+  it("keeps genuine repeats at distinct positions (word clouds)", () => {
+    const raw = JSON.stringify({ items: [
+      { text: "虎符", from: [100, 100], to: [200, 110] },
+      { text: "虎符", from: [500, 500], to: [600, 510] },
+      { text: "虎符", from: [800, 300], to: [900, 310] },
+    ] });
+    expect(parseOcrVectors(raw, null)).toHaveLength(3);
+  });
+
+  it("kills marching clone chains (stepping boxes)", () => {
+    const mk = (i: number) => ({ text: "年職多方查證該虎符", box: [500 + i * 30, 400 + i * 60, 660 + i * 30, 700 + i * 60], from: [500 + i * 30, 400 + i * 60], to: [660 + i * 30, 700 + i * 60] });
+    const lines = parseOcrVectors(JSON.stringify({ items: [mk(0), mk(1), mk(2), mk(3), mk(4)] }), null);
+    expect(lines).toHaveLength(1);
+  });
+});
+
 describe("grid→pixel conversion (the twice-bitten bug class)", () => {
   it("fused box+vector items land in PIXEL space with dims (grid 0-1000 → image px)", () => {
     const raw = JSON.stringify({ items: [
