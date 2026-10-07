@@ -5,6 +5,7 @@
 // CI coverage lives in tests/unit/ocr-baseline.test.ts, which replays the
 // recorded raw outputs through the app's own extractJson — no gateway needed.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { parseOcrVectors } from "../src/server/llm";
 
 const BASE = process.env.OPENAI_API_BASE ?? "https://api.thekao.cloud/v1";
 const KEY = process.env.OPENAI_API_KEY ?? "";
@@ -15,6 +16,7 @@ export const VECTOR_SYSTEM = `You are an OCR engine. Find every block of Chinese
 - Coordinates on a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right).
 - The from→to vector must run ALONG the text's own axis: horizontal text → left-to-right vector; vertical text → top-to-bottom; diagonal text → its actual diagonal. A single standalone word is its own small block.
 - TEXT ON A CURVE: split it into SHORT consecutive blocks (3-5 characters each), each block following the LOCAL direction of the curve at that point.
+- Group characters that belong to one word or short phrase into a SINGLE block (entries in a word cloud are words, not individual characters); emit a standalone single character only when it is truly isolated.
 - Text always reads from→to. Transcribe each block EXACTLY ONCE — never repeat text.`;
 
 export const FIXTURES = [
@@ -39,7 +41,7 @@ export const FIXTURES = [
     known: ["舉頭望明月", "低頭思故鄉"], minBlocks: 1, maxDupes: 0 },
 ];
 
-async function ask(system: string, file: string, maxTokens = 4000): Promise<string> {
+async function ask(system: string, file: string, maxTokens = 8000): Promise<string> {
   const b64 = readFileSync(file).toString("base64");
   const mime = file.endsWith(".png") ? "image/png" : "image/jpeg";
   const res = await fetch(`${BASE}/chat/completions`, {
@@ -88,27 +90,21 @@ export function extractJsonBalanced(text: string): unknown {
 export interface VectorRow { text: string; chars: number; len: number; angle: number; pitch: number; from: [number, number]; to: [number, number] }
 
 export function validateVectorItems(raw: string): { rows: VectorRow[]; dupes: number; offGrid: number; zeroLen: number; rawCount: number } {
-  const parsed = extractJsonBalanced(raw) as { items?: { text?: unknown; from?: unknown; to?: unknown }[] } | { text?: unknown; from?: unknown; to?: unknown }[] | null;
-  // the model emits EITHER {"items":[…]} OR a bare top-level array — accept both
-  const items = Array.isArray(parsed) ? parsed : (parsed && Array.isArray((parsed as { items?: unknown[] }).items) ? (parsed as { items: { text?: unknown; from?: unknown; to?: unknown }[] }).items : []);
+  // single source of truth: the APP parser (shape tolerance + salvage + chaining)
+  const lines = parseOcrVectors(raw, null);
   const rows: VectorRow[] = [];
-  let outOfGrid = 0, zeroLen = 0, dupes = 0, offGrid = 0;
+  let dupes = 0;
   const seen = new Set<string>();
-  for (const it of items) {
-    const text = typeof it.text === "string" ? it.text.trim() : "";
-    const f = Array.isArray(it.from) ? (it.from as number[]).map(Number) : null;
-    const t = Array.isArray(it.to) ? (it.to as number[]).map(Number) : null;
-    if (!text || !f || !t || f.length !== 2 || t.length !== 2 || [...f, ...t].some((n) => !Number.isFinite(n))) continue;
-    if ([...f, ...t].some((n) => n < -60 || n > 1060)) { outOfGrid++; continue; }
-    const len = Math.hypot(t[0]! - f[0]!, t[1]! - f[1]!);
-    if (len < 3) { zeroLen++; continue; }
-    if (seen.has(text)) { dupes++; continue; }
-    seen.add(text);
-    const angle = Math.round((Math.atan2(t[1]! - f[1]!, t[0]! - f[0]!) * 180) / Math.PI);
-    const chars = [...text].length;
-    rows.push({ text, chars, len, angle, pitch: Math.round(len / chars), from: [f[0]!, f[1]!] as [number, number], to: [t[0]!, t[1]!] as [number, number] });
+  for (const ln of lines) {
+    if (seen.has(ln.text)) { dupes++; continue; }
+    seen.add(ln.text);
+    if (!ln.from || !ln.to) continue;
+    const f = ln.from;
+    const t = ln.to;
+    const len = Math.hypot(t[0] - f[0], t[1] - f[1]);
+    rows.push({ text: ln.text, chars: [...ln.text].length, len, angle: ln.angle ?? 0, pitch: Math.round(len / Math.max(1, [...ln.text].length)), from: f, to: t });
   }
-  return { rows, dupes, offGrid, zeroLen, rawCount: items.length };
+  return { rows, dupes, offGrid: 0, zeroLen: 0, rawCount: lines.length };
 }
 
 function knownHits(rows: VectorRow[], known: string[]): number {

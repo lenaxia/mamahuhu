@@ -544,11 +544,13 @@ export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | n
     | { items?: { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown }[] }
     | { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown }[]
     | null;
+  // dense pages can exceed the token budget mid-list — salvage every COMPLETE
+  // item object from the truncated text instead of discarding all of it
   const items = Array.isArray(parsed)
     ? parsed
     : parsed && Array.isArray(parsed.items)
       ? parsed.items
-      : [];
+      : salvageItems(raw);
   const lines: OcrLine[] = [];
   for (const it of items) {
     if (!it || typeof it.text !== "string" || !it.text.trim()) continue;
@@ -582,6 +584,18 @@ export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | n
     }
   }
   return chainContinuations(lines);
+}
+
+/** complete {...} item objects scraped from a truncated JSON list */
+function salvageItems(raw: string): { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown }[] {
+  const out: { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown }[] = [];
+  for (const m of raw.matchAll(/\{[^{}]*\}/g)) {
+    try {
+      const obj = JSON.parse(m[0]) as { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown };
+      if (typeof obj.text === "string" && obj.text.trim()) out.push(obj);
+    } catch { /* partial tail object — skip */ }
+  }
+  return out;
 }
 
 /** The model sometimes emits a line's TAIL as a separate item whose from ==
@@ -638,6 +652,7 @@ export class GatewayOcrService implements OcrService {
 - from = point where the text block STARTS (start of its baseline); to = where it ENDS. Coordinates on a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis).
 - The from→to vector must run ALONG the text's own axis: horizontal text → left-to-right vector; vertical text → top-to-bottom; diagonal text → its actual diagonal. A single standalone word is its own small block.
 - TEXT ON A CURVE: split it into SHORT consecutive blocks (3-5 characters each), each following the LOCAL direction of the curve at that point.
+- Group characters that belong to one word or short phrase into a SINGLE block (entries in a word cloud are words, not individual characters); emit a standalone single character only when it is truly isolated.
 - Text always reads from→to. Transcribe each block EXACTLY ONCE — never repeat text.`;
       const user = [
         { type: "text", text: "Transcribe the Chinese text blocks." },
@@ -652,7 +667,7 @@ export class GatewayOcrService implements OcrService {
           body: JSON.stringify({
             model: this.cfg.model,
             temperature: 0,
-            max_tokens: 3000,
+            max_tokens: 8000,
             messages: attempt === 0
               ? [{ role: "system", content: system }, { role: "user", content: user }]
               : [

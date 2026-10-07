@@ -82,6 +82,14 @@ describe("OCR baseline replay (real recorded model outputs, CI-safe)", () => {
   }
 });
 
+describe("truncation salvage", () => {
+  it("recovers every complete item from a token-budget-truncated list (the dense word-cloud failure)", () => {
+    const raw = `{"items":[{"text":"我們","from":[100,100],"to":[300,110]},{"text":"喜歡","from":[400,200],"to":[560,210]},{"text":"你";
+    const lines = parseOcrVectors(raw, null);
+    expect(lines.map((l) => l.text)).toEqual(["我們", "喜歡"]); // third item cut mid-object — dropped
+  });
+});
+
 describe("chaining (continuation fragments)", () => {
   it("merges a tail fragment whose from == the parent line's to (the diagonal-letter failure)", () => {
     const raw = JSON.stringify({ items: [
