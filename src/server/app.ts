@@ -579,6 +579,19 @@ async function buildPhrase(
       if (bh > bw && chars > 1) return dir === "h" ? "v" : (dir ?? "v"); // tall box can't be a row
       return dir;
     };
+    /** char cell along the line VECTOR at fraction [s,e) of its length — square-ish
+     *  cell centered on the axis so rotated chips render true at any angle */
+    const cellAlong = (
+      f: [number, number], to: [number, number], len: number, s: number, e: number, chars: number,
+    ): [number, number, number, number] => {
+      const ux = (to[0] - f[0]) / len;
+      const uy = (to[1] - f[1]) / len;
+      const cx = f[0] + ux * (s + (e - s) / 2) * len;
+      const cy = f[1] + uy * (s + (e - s) / 2) * len;
+      const half = ((e - s) * len) / 2;
+      void chars;
+      return [Math.round(cx - Math.abs(ux) * half), Math.round(cy - Math.abs(uy) * half), Math.round(cx + Math.abs(ux) * half), Math.round(cy + Math.abs(uy) * half)];
+    };
     for (const line of res.value.lines) {
       const dir = lineDir(line.dir, line.box, [...line.text].length);
       lineTexts.push(line.text);
@@ -587,11 +600,22 @@ async function buildPhrase(
       const totalChars = segments.reduce((s, seg) => s + [...seg].length, 0) || 1;
       let xCursor = line.box?.[0];
       let yCursor = line.box?.[1];
+      // VECTOR lines: distribute word cells along the from→to axis; each word
+      // carries the line angle so the overlay renders rotated to the text
+      let charCursor = 0;
+      const lineAngle = line.angle;
+      const along: undefined | ((s: number, e: number) => [number, number, number, number]) =
+        line.from && line.to
+          ? (s, e) => cellAlong(line.from!, line.to!, Math.hypot(line.to![0]! - line.from![0]!, line.to![1]! - line.from![1]!), s, e, totalChars)
+          : undefined;
       for (const seg of segments) {
         const hit = lookup(seg);
         const segLen = [...seg].length;
         let box: [number, number, number, number] | undefined;
-        if (line.box) {
+        if (along) {
+          box = along(charCursor / totalChars, (charCursor + segLen) / totalChars);
+          positioned = true;
+        } else if (line.box) {
           if (dir === "v" && yCursor !== undefined) {
             // vertical column: split the line box along Y by char count
             const hStep = ((line.box[3] - line.box[1]) * segLen) / totalChars;
@@ -605,7 +629,8 @@ async function buildPhrase(
           if (box) positioned = true;
         }
         if (hit) {
-          words.push({ ...hit, known: true, saved: savedSet.has(hit.traditional), box, dir });
+          words.push({ ...hit, known: true, saved: savedSet.has(hit.traditional), box, dir, ...(lineAngle !== undefined ? { angle: lineAngle } : {}) });
+          charCursor += segLen;
           continue;
         }
         // char decomposition: split the segment box across its chars so no
@@ -613,7 +638,9 @@ async function buildPhrase(
         const chs = [...seg];
         chs.forEach((ch, ci) => {
           let chBox: [number, number, number, number] | undefined;
-          if (box) {
+          if (along) {
+            chBox = along((charCursor + ci) / totalChars, (charCursor + ci + 1) / totalChars);
+          } else if (box) {
             const cw = (box[2] - box[0]) / chs.length;
             chBox = [
               Math.round(box[0] + cw * ci),
@@ -623,9 +650,10 @@ async function buildPhrase(
             ];
           }
           const charHit = lookup(ch);
-          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(charHit.traditional), box: chBox, dir });
-          else words.push({ traditional: toTraditional(ch), simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, box: chBox, dir });
+          if (charHit) words.push({ ...charHit, known: true, saved: savedSet.has(charHit.traditional), box: chBox, dir, ...(lineAngle !== undefined ? { angle: lineAngle } : {}) });
+          else words.push({ traditional: toTraditional(ch), simplified: ch, pinyin: "", bpmf: "", english: "", known: false, saved: false, box: chBox, dir, ...(lineAngle !== undefined ? { angle: lineAngle } : {}) });
         });
+        charCursor += segLen;
       }
       if (words.length) lines.push({ words });
     }

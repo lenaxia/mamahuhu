@@ -189,9 +189,12 @@ export function PhotoPage({
                   const boxW = (x2 - x1) * imgScale * z;
                   const chars = [...wd.traditional];
                   const n = chars.length || 1;
+                  // angled text (vector contract): always lay out horizontally and
+                  // rotate the chip to the text axis — 90° rotated = vertical reading
+                  const angled = wd.angle !== undefined && wd.angle !== 0;
                   // direction from the model; aspect fallback when absent.
                   // text must FIT the box: tall boxes stack chars vertically.
-                  const tall = wd.dir === "v" || (wd.dir !== "h" && boxH > boxW * 1.25 && n > 1);
+                  const tall = !angled && (wd.dir === "v" || (wd.dir !== "h" && boxH > boxW * 1.25 && n > 1));
                   // shrink-to-fit: CJK glyph ≈ 1em wide/tall; subtract border+padding.
                   // no floor above ~6 — tiny poster boxes must win over legibility
                   const fontSize = tall
@@ -212,6 +215,7 @@ export function PhotoPage({
                         height: chipH,
                         fontSize,
                         lineHeight: 1.1,
+                        ...(angled ? { transform: `rotate(${wd.angle}deg)`, transformOrigin: "center" } : {}),
                       }}
                       className={`hanzi absolute flex ${tall ? "flex-col" : "flex-row"} items-center justify-center overflow-hidden rounded-md border px-0.5 ${
                         ocrWord?.traditional === wd.traditional

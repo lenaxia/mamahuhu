@@ -525,6 +525,59 @@ export class UnavailableStt implements SttService {
   }
 }
 
+/** Snap near-axis angles: models report 8-23° for level text (measured on the
+ *  flat poster fixture) — anything within 20° of an axis snaps to it; true
+ *  diagonals pass through untouched. */
+export function snapAngle(a: number): number {
+  if (Math.abs(a) <= 20) return 0;
+  if (a >= 70 && a <= 110) return 90;
+  if (a <= -70 && a >= -110) return -90;
+  return a;
+}
+
+/** Parse the VECTOR OCR contract: {"items":[{"text","from":[x,y],"to":[x,y]}]}
+ *  — or a bare top-level array (the model emits both), tolerating box-shaped
+ *  items for robustness. Validated against bench/fixtures (8 geometry regimes).
+ *  No text dedupe: repeated words are legitimate (word clouds). */
+export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | null): OcrLine[] {
+  const parsed = extractJson(raw) as
+    | { items?: { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown }[] }
+    | { text?: unknown; from?: unknown; to?: unknown; box?: unknown; dir?: unknown }[]
+    | null;
+  const items = Array.isArray(parsed)
+    ? parsed
+    : parsed && Array.isArray(parsed.items)
+      ? parsed.items
+      : [];
+  const lines: OcrLine[] = [];
+  for (const it of items) {
+    if (!it || typeof it.text !== "string" || !it.text.trim()) continue;
+    const text = it.text.trim();
+    const f = Array.isArray(it.from) ? (it.from as unknown[]).map(Number) : null;
+    const t = Array.isArray(it.to) ? (it.to as unknown[]).map(Number) : null;
+    if (f && t && f.length === 2 && t.length === 2 && [...f, ...t].every((n) => Number.isFinite(n) && n >= -60 && n <= 1060)) {
+      const len = Math.hypot(t[0]! - f[0]!, t[1]! - f[1]!);
+      if (len < 3) continue;
+      const angle = snapAngle(Math.round((Math.atan2(t[1]! - f[1]!, t[0]! - f[0]!) * 180) / Math.PI));
+      const pad = (len / Math.max(1, [...text].length)) * 0.5;
+      const box: [number, number, number, number] = [
+        Math.round(Math.min(f[0]!, t[0]!) - pad),
+        Math.round(Math.min(f[1]!, t[1]!) - pad),
+        Math.round(Math.max(f[0]!, t[0]!) + pad),
+        Math.round(Math.max(f[1]!, t[1]!) + pad),
+      ];
+      lines.push({ text, from: [f[0]!, f[1]!], to: [t[0]!, t[1]!], angle, box, dir: Math.abs(angle) > 45 ? "v" : "h" });
+      continue;
+    }
+    // legacy box items pass through unchanged
+    const b = Array.isArray(it.box) ? (it.box as unknown[]).map(Number) : null;
+    if (b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!) {
+      lines.push({ text, box: [b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number], dir: it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined });
+    }
+  }
+  return lines;
+}
+
 export class GatewayOcrService implements OcrService {
   constructor(private cfg: { base: string; key: string; model: string }) {}
   available(): boolean { return true; }
@@ -534,17 +587,13 @@ export class GatewayOcrService implements OcrService {
       const b64 = Buffer.from(bytes).toString("base64");
       const dims = parseImageDims(bytes);
       const system =
-        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style).
-CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the poster's orientation:
-- A horizontal line of N characters has a WIDE-SHORT box (width ≈ N × char height) and dir "h".
-- A vertical column of N characters has a TALL-NARROW box (height ≈ N × char width) and dir "v".
-- On a VERTICAL roll-up banner, header pills and speech-bubble body text are usually HORIZONTAL lines
-  (wide-short, dir "h") even though the banner itself is tall. Do not label horizontal lines "v".
-- Only text physically printed as top-to-bottom columns (right side of traditional signs, 竖排) gets dir "v" with a tall-narrow box. ${
-          dims ? `The image is EXACTLY ${dims.w}×${dims.h} pixels. ` : ""
-        }box coordinates are numbers in a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis). Box ONLY the Han characters, not adjacent zhuyin. Omit box if truly unsure — never invent coordinates.`;
+        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Find every block of Han text (ignore bopomofo/zhuyin annotation symbols). Return ONLY valid JSON, no prose: {"items":[{"text":"…","from":[x1,y1],"to":[x2,y2]}]}
+- from = point where the text block STARTS (start of its baseline); to = where it ENDS. Coordinates on a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right corner on each axis).
+- The from→to vector must run ALONG the text's own axis: horizontal text → left-to-right vector; vertical text → top-to-bottom; diagonal text → its actual diagonal. A single standalone word is its own small block.
+- TEXT ON A CURVE: split it into SHORT consecutive blocks (3-5 characters each), each following the LOCAL direction of the curve at that point.
+- Text always reads from→to. Transcribe each block EXACTLY ONCE — never repeat text.`;
       const user = [
-        { type: "text", text: "Transcribe the Chinese text, one item per line, with boxes." },
+        { type: "text", text: "Transcribe the Chinese text blocks." },
         { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
       ];
 
@@ -563,7 +612,7 @@ CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the 
                   { role: "system", content: system },
                   { role: "user", content: user },
                   { role: "assistant", content: raw.slice(0, 3000) },
-                  { role: "user", content: "That was not the JSON format requested. Return ONLY the JSON object {\"items\":[…]} — no prose, no code fences." },
+                  { role: "user", content: "That was not the JSON format requested. Return ONLY the JSON {\"items\":[…]} (or a bare JSON array of items) — no prose, no code fences." },
                 ],
           }),
         });
@@ -572,23 +621,10 @@ CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the 
         raw = data.choices?.[0]?.message?.content ?? "";
         if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
 
-        const lines: OcrLine[] = [];
-        const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
-        if (parsed?.items?.length) {
-          for (const it of parsed.items) {
-            if (typeof it.text !== "string" || !it.text.trim()) continue;
-            const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
-            const box =
-              b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
-                ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
-                : undefined;
-            const dir = it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined;
-            lines.push({ text: it.text.trim(), box, dir });
-          }
-          if (lines.length) {
-            const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
-            return { ok: true, value: { lines: healed } };
-          }
+        const lines = parseOcrVectors(raw, dims);
+        if (lines.length) {
+          const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
+          return { ok: true, value: { lines: healed } };
         }
       }
 
@@ -819,6 +855,16 @@ export class MockOcrService implements OcrService {
   async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
     // mock convention: uploads named plant*/blank* are textless (subject photos)
     const name = (image as File).name ?? "";
+    // uploads named vector*: exercise the from→to vector contract (angled text)
+    if (/vector/i.test(name)) {
+      return {
+        ok: true,
+        value: { lines: [
+          { text: "床前明月光", from: [100, 100], to: [500, 300], angle: 27 },
+          { text: "疑是地上霜", box: [100, 400, 500, 500], dir: "h" },
+        ] },
+      };
+    }
     if (/plant|blank|textless/i.test(name)) return { ok: true, value: { lines: [] } };
     // vertical: uploads named vertical* contain a top-to-bottom column
     if (/vertical/i.test(name)) {

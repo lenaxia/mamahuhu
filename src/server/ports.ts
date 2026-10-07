@@ -72,7 +72,16 @@ export interface SttService {
   transcribe(audio: Blob, opts?: { language?: "zh" | "en" | "auto" }): Promise<Result<{ text: string; language: string }>>;
 }
 
-export type OcrLine = { text: string; box?: [number, number, number, number]; dir?: "h" | "v" };
+export type OcrLine = {
+  text: string;
+  box?: [number, number, number, number];
+  dir?: "h" | "v";
+  /** vector contract: baseline endpoints on the 0-1000 grid */
+  from?: [number, number];
+  to?: [number, number];
+  /** text axis in degrees (0 = horizontal L→R, 90 = vertical T→B); snapped to axes when near */
+  angle?: number;
+};
 
 /** Subject identification for textless photos → ranked Mandarin name tags for everything visible. */
 export interface DescribeTag {

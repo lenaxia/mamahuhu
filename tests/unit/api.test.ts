@@ -366,6 +366,22 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     expect(body.askId).toBeTruthy();
   });
 
+  it("vector OCR lines distribute word cells along the axis and carry angle", async () => {
+    const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 5, g: 5, b: 5 } } }).png().toBuffer();
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "vector-diagonal.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.positioned).toBe(true);
+    const words = body.lines.flatMap((l: { words: { traditional: string; angle?: number; box?: number[] }[] }) => l.words);
+    const moon = words.find((w: { traditional: string }) => w.traditional === "月光");
+    expect(moon?.angle).toBe(27); // diagonal angle flows to the client
+    const frost = words.find((w: { traditional: string }) => w.traditional === "地上");
+    expect(frost?.box?.[0]).toBeGreaterThan(100); // legacy box line still distributes
+  });
+
   it("entries link to their source ask; follow-ups survive history deletion", async () => {
     // save an entry carrying the ask link
     const e = await (

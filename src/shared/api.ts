@@ -209,6 +209,8 @@ export const OcrWordSchema = RenderedWordSchema.extend({
   box: BoxSchema.optional(),
   /** reading direction from the model: h = horizontal line, v = vertical column */
   dir: z.enum(["h", "v"]).optional(),
+  /** text axis in degrees (0 = horizontal, 90 = vertical) — chips render rotated to it */
+  angle: z.number().optional(),
 });
 export const IdentifySchema = z.object({
   traditional: z.string(),

@@ -168,7 +168,11 @@ export function AskScreen(): React.JSX.Element {
     setOcrBusy(true);
     try {
       const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-      const { blob, w, h } = isPdf ? { blob: file, w: 1000, h: 1414 } : await downscale(file);
+      // send the ORIGINAL bytes — OCR quality comes from full fidelity; the
+      // server stores a display-sized webp alongside for fast loading
+      const blob = isPdf ? file : file;
+      const w = isPdf ? 1000 : 0;
+      const h = isPdf ? 1414 : 0;
       setPhoto({ url: isPdf ? "pdf" : URL.createObjectURL(blob), w, h });
       const res = await api.ocr(blob);
       const url = isPdf ? "pdf" : (photo?.url ?? "");
