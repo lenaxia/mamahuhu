@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
 import { api, ApiError } from "../api";
-import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard } from "../components/Cards";
+import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard, FullTranslationCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
 import { OcrView } from "../components/OcrView";
@@ -382,6 +382,9 @@ export function AskScreen(): React.JSX.Element {
 
       {hanziWords && (
         <div className="space-y-3">
+          {hanziWords.fullTranslation && (
+            <FullTranslationCard hanzi={hanziWords.words.map((w) => w.traditional).join("")} english={hanziWords.fullTranslation} words={hanziWords.words} source="hanzi" />
+          )}
           {hanziWords.phrase && <PhraseCard phrase={hanziWords.phrase} words={hanziWords.words} source="hanzi" />}
           {hanziWords.phrase && <div className="text-xs uppercase tracking-wide text-neutral-400">words</div>}
           {hanziWords.words.map((w, i) => (
@@ -393,6 +396,9 @@ export function AskScreen(): React.JSX.Element {
       {sttResult && (
         <div className="space-y-3">
           <div className="text-xs uppercase tracking-wide text-neutral-400">heard: “{sttResult.text}”</div>
+          {sttResult.route === "hanzi" && sttResult.hanzi?.fullTranslation && (
+            <FullTranslationCard hanzi={sttResult.hanzi.words.map((w) => w.traditional).join("")} english={sttResult.hanzi.fullTranslation} words={sttResult.hanzi.words} source="stt" />
+          )}
           {sttResult.route === "hanzi" && sttResult.hanzi?.phrase && (
             <PhraseCard phrase={sttResult.hanzi.phrase} words={sttResult.hanzi.words} source="stt" />
           )}

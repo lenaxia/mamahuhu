@@ -480,7 +480,7 @@ describe("speak (mocked STT, auto-routing)", () => {
 });
 
 describe("phrase card", () => {
-  it("multi-word hanzi input includes a whole-phrase card", async () => {
+  it("multi-word hanzi input gets an LLM-decided full translation (no phrase card)", async () => {
     const res = await app.request("/api/ask/hanzi", {
       method: "POST",
       headers: H,
@@ -488,10 +488,8 @@ describe("phrase card", () => {
     });
     const body = await res.json();
     expect(body.words.length).toBeGreaterThanOrEqual(3);
-    expect(body.phrase).toBeTruthy();
-    expect(body.phrase.traditional).toBe("恭喜發財紅包拿來");
-    expect(body.phrase.pinyin).toContain("gōng xǐ");
-    expect(body.phrase.english).toBe("mock phrase gloss");
+    expect(body.fullTranslation).toContain("MOCK full translation");
+    expect(body.phrase).toBeUndefined();
   });
 
   it("single-word input has no phrase card", async () => {
@@ -555,15 +553,15 @@ describe("chinese questions", () => {
     expect(body.phrase.english).toBe("airplane");
   });
 
-  it("plain zh questions keep the meaning card", async () => {
+  it("plain zh questions keep the full translation", async () => {
     const res = await app.request("/api/ask/hanzi", {
       method: "POST",
       headers: H,
       body: JSON.stringify({ text: "你怎麼坐飛機" }),
     });
     const body = await res.json();
-    expect(body.phrase.answer).toBe(false);
-    expect(body.phrase.english.length).toBeGreaterThan(0);
+    expect(body.fullTranslation).toContain("MOCK full translation");
+    expect(body.phrase).toBeUndefined();
   });
 });
 

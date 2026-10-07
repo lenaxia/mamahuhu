@@ -255,14 +255,17 @@ export class LlmTranslationService implements TranslationService {
   async fullZh(text: string): Promise<Result<string>> {
     const res = await this.chat.complete(
       [
-        { role: "system", content: `Translate this Chinese text completely into natural English. The text may be Mandarin OR colloquial Cantonese (口語). It may contain line breaks from a photo: use judgment — join lines that form one sentence, keep separate items (bullets, lists, slogans) separate on their own lines. Reply with ONLY the translation, no notes, no Chinese.` },
+        { role: "system", content: `Translate this Chinese text into natural English. The text may be Mandarin OR colloquial Cantonese (口語) and may contain line breaks from a photo.
+DECIDE FIRST: if the text is a single word or a short standalone phrase (something a dictionary entry alone would explain), reply with exactly NONE — no translation needed. Otherwise reply with ONLY the complete translation: join lines that form one sentence, keep separate items (bullets, lists, slogans) on their own lines. No notes, no Chinese.` },
         { role: "user", content: text },
       ],
       { model: this.model, temperature: 0.2, maxTokens: 400 },
     );
     if (!res.ok) return res;
     const full = res.value.trim().replace(/^["'「」]+|["'「」]+$/g, "");
-    return full ? { ok: true, value: full } : { ok: false, error: "empty translation" };
+    if (!full) return { ok: false, error: "empty translation" };
+    if (/^none\.?$/i.test(full)) return { ok: true, value: "" }; // "" = omit (LLM decided single-phrase)
+    return { ok: true, value: full };
   }
 
   async answerZh(text: string): Promise<Result<string>> {
@@ -281,6 +284,9 @@ export class LlmTranslationService implements TranslationService {
 
 export class MockTranslationService implements TranslationService {
   async fullZh(text: string): Promise<Result<string>> {
+    const han = [...text].filter((c) => /\p{Script=Han}/u.test(c));
+    // mock the LLM's judgment: single word/short phrase → NONE (""), sentences → full translation
+    if (han.length <= 4 && !/[，。！？,!?]/.test(text)) return { ok: true, value: "" };
     return { ok: true, value: `MOCK full translation of: ${text.slice(0, 40)}` };
   }
 

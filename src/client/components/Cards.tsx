@@ -244,6 +244,49 @@ export function PhraseCard({
   );
 }
 
+/** Complete-translation card — shared by typed hanzi, speech, and photo input.
+ *  The LLM decided this text is more than a word list; show the full Chinese
+ *  (annotated when word data is available) plus its complete English. */
+export function FullTranslationCard({
+  hanzi,
+  english,
+  words,
+  source,
+  askId,
+}: {
+  hanzi: string;
+  english: string;
+  words?: RenderedWord[];
+  source: EntrySource;
+  askId?: string;
+}): React.JSX.Element {
+  const annotations = useAnnotations();
+  const { saved, save } = useSaver(source, undefined, askId);
+  const syllables: Syllables | null = words && words.length ? [words.flatMap(wordChars)] : null;
+  const asWord: RenderedWord = {
+    traditional: hanzi,
+    simplified: hanzi,
+    pinyin: words?.map((w) => w.pinyin).filter(Boolean).join(" ") ?? "",
+    bpmf: "",
+    english,
+  };
+  return (
+    <div data-traditional={hanzi} className="rounded-2xl border-2 border-sky-300 dark:border-sky-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-400">full translation</span>
+        <CopyButton text={english} className="h-8 w-8" />
+      </div>
+      {syllables ? (
+        <AnnotatedText syllables={syllables} annotations={annotations} />
+      ) : (
+        <p lang="zh-Hant" className="hanzi whitespace-pre-line text-lg leading-relaxed">{hanzi}</p>
+      )}
+      <p className="whitespace-pre-line text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">{english}</p>
+      <ActionRow text={hanzi} saved={saved} onSave={() => void save(asWord, syllables ?? [[{ h: hanzi, py: "", bpmf: "" }]])} />
+    </div>
+  );
+}
+
 /** Hanzi-input / OCR word card. */
 export function HanziWordCard({ word, onSaved, askId }: { word: RenderedWord & { known: boolean }; onSaved?: (t: string) => void; askId?: string }) {
   const annotations = useAnnotations();

@@ -311,7 +311,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
 async function buildPhrase(
   text: string,
   words: z.infer<typeof HanziWordSchema>[],
-): Promise<z.infer<typeof HanziPhraseSchema> | undefined> {
+): Promise<{ phrase?: z.infer<typeof HanziPhraseSchema>; fullTranslation?: string } | undefined> {
   if (words.length < 2) return undefined;
   const han = words.map((w) => w.traditional).join("");
   // zh meta-question (how-to-say-in-English / what-does-it-mean) → answer, don't translate
@@ -320,25 +320,21 @@ async function buildPhrase(
     const answer = await deps.translations.answerZh(text);
     if (answer.ok) {
       return {
-        traditional: han,
-        simplified: words.map((w) => w.simplified).join(""),
-        pinyin: words.map((w) => w.pinyin).filter(Boolean).join(" "),
-        bpmf: words.map((w) => w.bpmf).filter(Boolean).join(" "),
-        english: answer.value,
-        answer: true,
+        phrase: {
+          traditional: han,
+          simplified: words.map((w) => w.simplified).join(""),
+          pinyin: words.map((w) => w.pinyin).filter(Boolean).join(" "),
+          bpmf: words.map((w) => w.bpmf).filter(Boolean).join(" "),
+          english: answer.value,
+          answer: true,
+        },
       };
     }
   }
-  const gloss = await deps.translations.glossZh(text);
-  if (!gloss.ok) return undefined;
-  return {
-    traditional: han,
-    simplified: words.map((w) => w.simplified).join(""),
-    pinyin: words.map((w) => w.pinyin).filter(Boolean).join(" "),
-    bpmf: words.map((w) => w.bpmf).filter(Boolean).join(" "),
-    english: gloss.value,
-    answer: false,
-  };
+  // normal multi-word text: the LLM decides via fullZh whether a complete
+  // translation adds anything beyond the word cards ("" = omit)
+  const full = await deps.translations.fullZh(text);
+  return full.ok && full.value ? { fullTranslation: full.value } : undefined;
 }
 
   const app: App = new Hono<{ Variables: { user: UserRow } }>();
@@ -465,9 +461,11 @@ async function buildPhrase(
         words.push(lookup(ch) ?? { traditional: ch, simplified: ch, pinyin: "", bpmf: "", english: "", known: false });
       }
     }
+    const built = words.length > 1 ? await buildPhrase(parsed.data.text, words) : undefined;
     const payload = HanziResSchema.parse({
       words,
-      phrase: words.length > 1 ? await buildPhrase(parsed.data.text, words) : undefined,
+      phrase: built?.phrase,
+      fullTranslation: built?.fullTranslation,
     });
     await recordAsk(sql, c.get("user").id, "hanzi", parsed.data.text, payload);
     return c.json(payload);
@@ -656,12 +654,11 @@ async function buildPhrase(
     return c.json(payload);
   });
 
-  /** full English translation for multi-phrase text (photos, PDFs); null for single phrases */
+  /** full English translation for photos/PDFs — the LLM decides when it adds
+   *  anything beyond the word chips ("" = omit) */
   const fullTranslation = async (fullText: string): Promise<string | undefined> => {
-    const segs = segmentHanzi(fullText).filter((s) => s.trim().length > 0);
-    if (segs.length <= 1) return undefined; // single phrase — its own card carries the meaning
     const res = await deps.translations.fullZh(fullText.trim());
-    return res.ok ? res.value : undefined;
+    return res.ok && res.value ? res.value : undefined;
   };
 
   const identifyTags = async (rawBytes: Uint8Array | Buffer): Promise<(z.infer<typeof IdentifySchema> & { bpmf: string })[]> => {
@@ -723,8 +720,8 @@ async function buildPhrase(
 
     if (isHan(text)) {
       const words = hanziFor(text).words;
-      const phrase = words.length > 1 ? await buildPhrase(text, words) : undefined;
-      const hanzi = HanziResSchema.parse({ words, phrase });
+      const built = words.length > 1 ? await buildPhrase(text, words) : undefined;
+      const hanzi = HanziResSchema.parse({ words, phrase: built?.phrase, fullTranslation: built?.fullTranslation });
       const payload = SttResSchema.parse({ text, language, route: "hanzi", hanzi });
       await recordAsk(sql, user.id, "stt", text, payload);
       return c.json(payload);

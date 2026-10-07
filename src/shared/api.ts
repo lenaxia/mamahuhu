@@ -188,7 +188,13 @@ export const HanziPhraseSchema = z.object({
   answer: z.boolean().default(false),
 });
 export type HanziPhrase = z.infer<typeof HanziPhraseSchema>;
-export const HanziResSchema = z.object({ words: z.array(HanziWordSchema), phrase: HanziPhraseSchema.optional() });
+export const HanziResSchema = z.object({
+  words: z.array(HanziWordSchema),
+  /** meta-question answer card (how-do-I-say / what-does-it-mean) */
+  phrase: HanziPhraseSchema.optional(),
+  /** complete English translation of multi-phrase text — LLM decides (omitted for single words/short phrases) */
+  fullTranslation: z.string().optional(),
+});
 export type HanziRes = z.infer<typeof HanziResSchema>;
 
 export const BoxSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);

@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { Identify, OcrPage, OcrRes } from "../../shared/api";
 import { marksToNumbered, numberedToBpmf } from "../../shared/bpmf";
 import { api, ApiError } from "../api";
-import { HanziWordCard, FollowUpBox } from "./Cards";
+import { HanziWordCard, FollowUpBox, FullTranslationCard } from "./Cards";
 import { CopyButton } from "./CopyButton";
 import { PhotoPage } from "./PhotoPage";
 import { IconClose } from "./Icons";
@@ -257,16 +257,29 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
         </div>
       )}
 
-      {ocrResult.fullTranslation && (
+      {ocrResult.fullText && (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-400">full translation</span>
-            <CopyButton text={ocrResult.fullTranslation} className="h-7 w-7" />
+            <span className="text-xs uppercase tracking-wide text-neutral-400">full transcription</span>
+            <span className="flex items-center gap-1">
+              <CopyButton text={ocrResult.fullText} className="h-7 w-7" />
+              <button
+                aria-label="Play transcription"
+                onClick={() => speak(ocrResult.fullText)}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 text-xs"
+              >▶</button>
+            </span>
           </div>
-          <p className="whitespace-pre-line rounded-xl bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-200">
-            {ocrResult.fullTranslation}
-          </p>
+          <p lang="zh-Hant" className="hanzi whitespace-pre-line rounded-xl bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2 text-base leading-relaxed">{ocrResult.fullText}</p>
         </div>
+      )}
+      {ocrResult.fullTranslation && (
+        <FullTranslationCard
+          hanzi={ocrResult.fullText}
+          english={ocrResult.fullTranslation}
+          source="ocr"
+          askId={ocrResult.askId}
+        />
       )}
 
       {page.lines.length === 0 && !tags?.length && (
