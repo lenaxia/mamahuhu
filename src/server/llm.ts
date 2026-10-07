@@ -525,6 +525,46 @@ export class UnavailableStt implements SttService {
   }
 }
 
+/** Detects the degenerate-repetition failure mode GEOMETRICALLY, so genuine
+ *  repeated text (refrains, drilled characters) survives:
+ *  - clone marches: >=3 occurrences of a text whose boxes step by a near-
+ *    constant vector (measured +30x/+60y marching off-grid) → keep the first
+ *  - phantom boxes: coordinates escaping the 0-1000 grid by >60 units → drop
+ *  - boxless duplicates: cap at 3 (loops emit 5-20; real pages rarely repeat 4×)
+ */
+export function healRepetition(lines: OcrLine[]): OcrLine[] {
+  const inGrid = lines.filter((ln) => {
+    if (!ln.box) return true;
+    const [x1, y1, x2, y2] = ln.box;
+    return x1 >= -60 && y1 >= -60 && x2 <= 1060 && y2 <= 1060;
+  });
+  const byText = new Map<string, { ln: OcrLine; i: number }[]>();
+  inGrid.forEach((ln, i) => {
+    const list = byText.get(ln.text) ?? [];
+    list.push({ ln, i });
+    byText.set(ln.text, list);
+  });
+  const drop = new Set<number>();
+  for (const occurrences of byText.values()) {
+    if (occurrences.length >= 3 && occurrences.every((o) => o.ln.box)) {
+      let steps = 0;
+      for (let k = 2; k < occurrences.length; k++) {
+        const a = occurrences[k - 2]!.ln.box!;
+        const b = occurrences[k - 1]!.ln.box!;
+        const c = occurrences[k]!.ln.box!;
+        const d1 = [b[0] - a[0], b[1] - a[1]];
+        const d2 = [c[0] - b[0], c[1] - b[1]];
+        const near = Math.abs(d1[0]! - d2[0]!) <= 15 && Math.abs(d1[1]! - d2[1]!) <= 15 && (Math.abs(d1[0]!) > 0 || Math.abs(d1[1]!) > 0);
+        if (near) steps++;
+      }
+      if (steps >= 1) occurrences.slice(1).forEach((o) => drop.add(o.i)); // marching clone chain
+    } else if (occurrences.length > 3) {
+      occurrences.slice(3).forEach((o) => drop.add(o.i)); // boxless flood cap
+    }
+  }
+  return inGrid.filter((_, i) => !drop.has(i));
+}
+
 export class GatewayOcrService implements OcrService {
   constructor(private cfg: { base: string; key: string; model: string }) {}
   available(): boolean { return true; }
@@ -564,14 +604,17 @@ TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emi
                   { role: "system", content: system },
                   { role: "user", content: user },
                   { role: "assistant", content: raw.slice(0, 3000) },
-                  { role: "user", content: "That was not the JSON format requested. Return ONLY the JSON object {\"items\":[…]} — no prose, no code fences." },
+                  { role: "user", content: "That response was truncated or repeated itself. Return ONLY the JSON object {\"items\":[…]} — no prose, no code fences, each line EXACTLY once, stop after the last line of text." },
                 ],
           }),
         });
         if (!res.ok) return { ok: false, error: `ocr gateway ${res.status}: ${(await res.text()).slice(0, 200)}` };
-        const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-        raw = data.choices?.[0]?.message?.content ?? "";
+        const data = (await res.json()) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
+        const choice = data.choices?.[0];
+        raw = choice?.message?.content ?? "";
         if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
+        // truncation → the JSON cannot be balanced; retry instead of parsing a corpse
+        if (choice?.finish_reason === "length") continue;
 
         const lines: OcrLine[] = [];
         const parsed = extractJson(raw) as { skew?: unknown; items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
@@ -587,14 +630,20 @@ TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emi
             lines.push({ text: it.text.trim(), box, dir });
           }
           if (lines.length) {
-            const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
+            // degenerate repetition healed GEOMETRICALLY (marching clones die,
+            // genuine repeated text survives) + a sanity cap
+            const deduped = healRepetition(lines).slice(0, 60);
+            const healed = dims ? normalizeBoxes(deduped, dims.w, dims.h) : deduped;
             const skew = typeof parsed.skew === "number" && Number.isFinite(parsed.skew) && Math.abs(parsed.skew) <= 90 ? parsed.skew : undefined;
             return { ok: true, value: { lines: healed, ...(skew !== undefined ? { skew } : {}) } };
           }
         }
       }
 
-      // final fallback: plain-text lines, no boxes
+      // final fallback: plain-text lines, no boxes — but NEVER raw JSON
+      if (/^\s*\{/ .test(raw) || raw.includes('"items"')) {
+        return { ok: false, error: "ocr returned unusable JSON (repetition/truncation)" };
+      }
       const plain = raw
         .split("\n")
         .map((l) => l.trim())
