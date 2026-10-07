@@ -34,14 +34,16 @@ export function parseImageDims(buf: Uint8Array): { w: number; h: number } | null
  * large image), fall back to per-axis heuristics for mixed conventions.
  */
 export function normalizeBoxes(lines: OcrLine[], w: number, h: number): OcrLine[] {
-  const boxed = lines.filter((l) => l.box);
+  // vector-contract lines (from/to) arrive ALREADY in pixel space from
+  // parseOcrVectors — never rescale them, only legacy box-only lines
+  const boxed = lines.filter((l) => l.box && !l.from);
   if (!boxed.length || w <= 0 || h <= 0) return lines;
 
   const maxCoord = Math.max(...boxed.flatMap((l) => l.box!));
 
   if (maxCoord <= 1005) {
     // 0-1000 grid on both axes
-    return lines.map((l) => (l.box ? { ...l, box: scaleBox(l.box, w / 1000, h / 1000, w, h) } : l));
+    return lines.map((l) => (l.box && !l.from ? { ...l, box: scaleBox(l.box, w / 1000, h / 1000, w, h) } : l));
   }
 
   // mixed/absolute heuristics (backstop for other deployments)
@@ -50,7 +52,7 @@ export function normalizeBoxes(lines: OcrLine[], w: number, h: number): OcrLine[
   const yScale = yBeyond ? h / 1000 : 1;
   const xScale = xBeyond ? w / 1000 : 1;
   if (xScale === 1 && yScale === 1) return lines;
-  return lines.map((l) => (l.box ? { ...l, box: scaleBox(l.box, xScale, yScale, w, h) } : l));
+  return lines.map((l) => (l.box && !l.from ? { ...l, box: scaleBox(l.box, xScale, yScale, w, h) } : l));
 }
 
 function scaleBox(

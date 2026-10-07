@@ -559,14 +559,20 @@ export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | n
       const len = Math.hypot(t[0]! - f[0]!, t[1]! - f[1]!);
       if (len < 3) continue;
       const angle = snapAngle(Math.round((Math.atan2(t[1]! - f[1]!, t[0]! - f[0]!) * 180) / Math.PI));
-      const pad = (len / Math.max(1, [...text].length)) * 0.5;
+      // the model speaks a 0-1000 GRID; the overlay speaks PIXELS of the actual
+      // image — convert here (normalizeBoxes only heals boxes, never vectors)
+      const sx = _dims ? _dims.w / 1000 : 1;
+      const sy = _dims ? _dims.h / 1000 : 1;
+      const pf: [number, number] = [f[0]! * sx, f[1]! * sy];
+      const pt: [number, number] = [t[0]! * sx, t[1]! * sy];
+      const pad = (Math.hypot(pt[0] - pf[0], pt[1] - pf[1]) / Math.max(1, [...text].length)) * 0.5;
       const box: [number, number, number, number] = [
-        Math.round(Math.min(f[0]!, t[0]!) - pad),
-        Math.round(Math.min(f[1]!, t[1]!) - pad),
-        Math.round(Math.max(f[0]!, t[0]!) + pad),
-        Math.round(Math.max(f[1]!, t[1]!) + pad),
+        Math.round(Math.min(pf[0], pt[0]) - pad),
+        Math.round(Math.min(pf[1], pt[1]) - pad),
+        Math.round(Math.max(pf[0], pt[0]) + pad),
+        Math.round(Math.max(pf[1], pt[1]) + pad),
       ];
-      lines.push({ text, from: [f[0]!, f[1]!], to: [t[0]!, t[1]!], angle, box, dir: Math.abs(angle) > 45 ? "v" : "h" });
+      lines.push({ text, from: pf, to: pt, angle, box, dir: Math.abs(angle) > 45 ? "v" : "h" });
       continue;
     }
     // legacy box items pass through unchanged
