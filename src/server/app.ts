@@ -463,6 +463,7 @@ async function buildPhrase(
     }
     const built = words.length > 1 ? await buildPhrase(parsed.data.text, words) : undefined;
     const payload = HanziResSchema.parse({
+      text: parsed.data.text,
       words,
       phrase: built?.phrase,
       fullTranslation: built?.fullTranslation,
@@ -721,7 +722,7 @@ async function buildPhrase(
     if (isHan(text)) {
       const words = hanziFor(text).words;
       const built = words.length > 1 ? await buildPhrase(text, words) : undefined;
-      const hanzi = HanziResSchema.parse({ words, phrase: built?.phrase, fullTranslation: built?.fullTranslation });
+      const hanzi = HanziResSchema.parse({ text, words, phrase: built?.phrase, fullTranslation: built?.fullTranslation });
       const payload = SttResSchema.parse({ text, language, route: "hanzi", hanzi });
       await recordAsk(sql, user.id, "stt", text, payload);
       return c.json(payload);

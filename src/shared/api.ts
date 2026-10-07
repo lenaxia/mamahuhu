@@ -189,6 +189,8 @@ export const HanziPhraseSchema = z.object({
 });
 export type HanziPhrase = z.infer<typeof HanziPhraseSchema>;
 export const HanziResSchema = z.object({
+  /** the original input text (line breaks intact) — powers the transcription block */
+  text: z.string().default(""),
   words: z.array(HanziWordSchema),
   /** meta-question answer card (how-do-I-say / what-does-it-mean) */
   phrase: HanziPhraseSchema.optional(),

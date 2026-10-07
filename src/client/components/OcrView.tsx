@@ -184,6 +184,7 @@ function MarkOverlay({ photoUrl, onCancel, onCrop }: { photoUrl: string; onCance
 export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; photoUrl: string; w: number; h: number }): React.JSX.Element {
   const [pageIndex, setPageIndex] = useState(0);
   const [markMode, setMarkMode] = useState(false);
+  const [savedWords, setSavedWords] = useState<Set<string>>(new Set());
   const [tags, setTags] = useState<Identify[] | undefined>(ocrResult.tags);
   const [openTag, setOpenTag] = useState<number | null>(null);
   const show = useToast().show;
@@ -257,29 +258,24 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
         </div>
       )}
 
-      {ocrResult.fullText && (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-neutral-400">full transcription</span>
-            <span className="flex items-center gap-1">
-              <CopyButton text={ocrResult.fullText} className="h-7 w-7" />
-              <button
-                aria-label="Play transcription"
-                onClick={() => speak(ocrResult.fullText)}
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 text-xs"
-              >▶</button>
-            </span>
-          </div>
-          <p lang="zh-Hant" className="hanzi whitespace-pre-line rounded-xl bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2 text-base leading-relaxed">{ocrResult.fullText}</p>
-        </div>
-      )}
       {ocrResult.fullTranslation && (
         <FullTranslationCard
-          hanzi={ocrResult.fullText}
+          text={ocrResult.fullText}
           english={ocrResult.fullTranslation}
           source="ocr"
           askId={ocrResult.askId}
         />
+      )}
+
+      {page.lines.length > 0 && (
+        <div className="space-y-2">
+          <span className="text-xs uppercase tracking-wide text-neutral-400">words</span>
+          <div className="space-y-2">
+            {page.lines.flatMap((l) => l.words).map((wd, i) => (
+              <HanziWordCard key={wd.traditional + i} word={wd} askId={ocrResult.askId} onSaved={(t) => setSavedWords((s) => new Set(s).add(t))} />
+            ))}
+          </div>
+        </div>
       )}
 
       {page.lines.length === 0 && !tags?.length && (

@@ -244,47 +244,63 @@ export function PhraseCard({
   );
 }
 
-/** Complete-translation card — shared by typed hanzi, speech, and photo input.
- *  The LLM decided this text is more than a word list; show the full Chinese
- *  (annotated when word data is available) plus its complete English. */
+/** Complete-text card — THE unified element for Chinese input (typed, spoken,
+ *  photo): full transcription (original line breaks intact) above the complete
+ *  English translation. Identical rendering on every surface; photos add the
+ *  overlay + tags above it and a words list below. */
 export function FullTranslationCard({
-  hanzi,
+  text,
   english,
   words,
   source,
   askId,
 }: {
-  hanzi: string;
+  text: string;
   english: string;
   words?: RenderedWord[];
   source: EntrySource;
   askId?: string;
 }): React.JSX.Element {
-  const annotations = useAnnotations();
   const { saved, save } = useSaver(source, undefined, askId);
-  const syllables: Syllables | null = words && words.length ? [words.flatMap(wordChars)] : null;
   const asWord: RenderedWord = {
-    traditional: hanzi,
-    simplified: hanzi,
+    traditional: text,
+    simplified: text,
     pinyin: words?.map((w) => w.pinyin).filter(Boolean).join(" ") ?? "",
     bpmf: "",
     english,
   };
+  const plainSyllables: Syllables = [[...text].filter(isHanChar).map((h) => ({ h, py: "", bpmf: "" }))];
   return (
-    <div data-traditional={hanzi} className="rounded-2xl border-2 border-sky-300 dark:border-sky-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-400">full translation</span>
-        <CopyButton text={english} className="h-8 w-8" />
+    <div className="rounded-2xl border-2 border-sky-300 dark:border-sky-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs uppercase tracking-wide text-neutral-400">full transcription</span>
+          <span className="flex items-center gap-1">
+            <CopyButton text={text} className="h-7 w-7" />
+            <span
+              role="button"
+              aria-label="Play transcription"
+              onClick={() => speak(text)}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 text-xs"
+            >▶</span>
+          </span>
+        </div>
+        <p lang="zh-Hant" className="hanzi whitespace-pre-line rounded-xl bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2 text-base leading-relaxed">{text}</p>
       </div>
-      {syllables ? (
-        <AnnotatedText syllables={syllables} annotations={annotations} />
-      ) : (
-        <p lang="zh-Hant" className="hanzi whitespace-pre-line text-lg leading-relaxed">{hanzi}</p>
-      )}
-      <p className="whitespace-pre-line text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">{english}</p>
-      <ActionRow text={hanzi} saved={saved} onSave={() => void save(asWord, syllables ?? [[{ h: hanzi, py: "", bpmf: "" }]])} />
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs uppercase tracking-wide text-sky-600 dark:text-sky-400">full translation</span>
+          <CopyButton text={english} className="h-7 w-7" />
+        </div>
+        <p className="whitespace-pre-line rounded-xl bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-200">{english}</p>
+      </div>
+      <ActionRow text={text} saved={saved} onSave={() => void save(asWord, plainSyllables)} />
     </div>
   );
+}
+
+function isHanChar(c: string): boolean {
+  return /\p{Script=Han}/u.test(c);
 }
 
 /** Hanzi-input / OCR word card. */
