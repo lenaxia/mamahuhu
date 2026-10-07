@@ -16,11 +16,24 @@ const run = promisify(execFile);
 
 interface RapidItem { box: [number, number, number, number]; text: string; score: number }
 
-/** shells the RapidOCR python helper (venv with rapidocr-onnxruntime) */
+/** RapidOCR access — HTTP service (production: OCR_HTTP_URL → mamahuhu-ocr
+ *  container) or the python venv shell-out (POC mode). Same response contract:
+ *  {items:[{box,text,score}], w, h} with boxes in ORIGINAL pixel space. */
 export class RapidOcrService {
-  constructor(private cfg: { python: string; script: string }) {}
+  constructor(private cfg: { python: string; script: string; httpUrl?: string }) {}
 
   async extract(bytes: Uint8Array): Promise<{ items: RapidItem[]; w: number; h: number }> {
+    if (this.cfg.httpUrl) {
+      const res = await fetch(`${this.cfg.httpUrl}/ocr`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: new Uint8Array(bytes),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (!res.ok) throw new Error(`ocr service ${res.status}`);
+      const j = (await res.json()) as { items?: RapidItem[]; w: number; h: number };
+      return { items: j.items ?? [], w: j.w, h: j.h };
+    }
     const dir = await mkdtemp(join(tmpdir(), "mmh-ocr-"));
     try {
       const img = join(dir, "in.png");

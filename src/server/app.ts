@@ -300,6 +300,7 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       new RapidOcrService({
         python: process.env.OCR_PYTHON ?? "/tmp/opencode/ocrvenv/bin/python",
         script: process.env.OCR_SCRIPT ?? "scripts/rapid-json.py",
+        httpUrl: process.env.OCR_HTTP_URL || undefined,
       }),
       ocr,
       { base, key, model: visionModel },
