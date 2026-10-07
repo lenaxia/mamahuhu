@@ -292,7 +292,18 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
         ? new GatewaySttService({ base, key, model: sttModel })
         : new UnavailableStt();
   const visionModel = process.env.MODEL_VISION ?? "default";
-  const ocr: OcrService = mock ? new MockOcrService() : new GatewayOcrService({ base, key, model: visionModel });
+  let ocr: OcrService = mock ? new MockOcrService() : new GatewayOcrService({ base, key, model: visionModel });
+  // OCR_LADDER=1: deterministic classical OCR first, LLM fallback (bench/ocr-ladder.ts)
+  if (!mock && process.env.OCR_LADDER === "1") {
+    const { LadderOcrService, RapidOcrService } = await import("./ocr-ladder");
+    ocr = new LadderOcrService(
+      new RapidOcrService({
+        python: process.env.OCR_PYTHON ?? "/tmp/opencode/ocrvenv/bin/python",
+        script: process.env.OCR_SCRIPT ?? "scripts/rapid-json.py",
+      }),
+      ocr,
+    );
+  }
   const describe: DescribeService = mock
     ? new MockDescribeService()
     : new GatewayDescribeService({ base, key, model: visionModel });
