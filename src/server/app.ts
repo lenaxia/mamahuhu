@@ -557,9 +557,27 @@ async function buildPhrase(
         return c.json({ error: `pdf failed: ${String(e).slice(0, 200)}` }, 502);
       }
     }
-    const res = await deps.ocr.extract(new File([new Uint8Array(nBytes)], image.name || "page.jpg", { type: "image/jpeg" }));
+    let res = await deps.ocr.extract(new File([new Uint8Array(nBytes)], image.name || "page.jpg", { type: "image/jpeg" }));
     if (!res.ok) return c.json({ error: res.error }, 502);
-    const stored = await storePhoto(new Uint8Array(nBytes));
+    let ocrBytes = nBytes;
+    // diagonal shots (over-the-shoulder screen grabs etc.): the model reports the
+    // skew angle; rotate the image and re-OCR so lines segment cleanly. The
+    // straightened image is what gets stored — overlay chips align, history
+    // shows readable text.
+    if (res.value.skew !== undefined && Math.abs(res.value.skew) >= 8) {
+      try {
+        const sharp = (await import("sharp")).default;
+        const rotated = await sharp(Buffer.from(nBytes)).rotate(res.value.skew, { background: "#ffffff" }).jpeg({ quality: 88 }).toBuffer();
+        const second = await deps.ocr.extract(new File([new Uint8Array(rotated)], image.name || "page.jpg", { type: "image/jpeg" }));
+        if (second.ok && second.value.lines.length) {
+          res = second;
+          ocrBytes = new Uint8Array(rotated);
+        }
+      } catch {
+        /* keep the unrotated result */
+      }
+    }
+    const stored = await storePhoto(new Uint8Array(ocrBytes));
 
 
     const lines: { words: z.infer<typeof OcrWordSchema>[] }[] = [];

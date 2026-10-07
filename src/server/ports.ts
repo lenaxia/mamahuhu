@@ -89,7 +89,9 @@ export interface DescribeService {
 /** Image OCR. Implementations may return absolute pixel boxes for overlay UI. */
 export interface OcrService {
   available(): boolean;
-  extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>>;
+  /** skew: degrees the image should be rotated CLOCKWISE to make text lines
+   *  horizontal (diagonal over-the-shoulder shots); absent when upright */
+  extract(image: Blob): Promise<Result<{ lines: OcrLine[]; skew?: number }>>;
 }
 
 /** Word/phrase lookup against the local dictionary. */

@@ -366,6 +366,19 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     expect(body.askId).toBeTruthy();
   });
 
+  it("skewed photos deskew and re-OCR before storing", async () => {
+    const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 200, height: 120, channels: 3, background: { r: 10, g: 10, b: 10 } } }).png().toBuffer();
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "skewed-letter.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // the DESKEWED second pass wins — fragmented diagonal text is gone
+    expect(body.fullText).toContain("密呈太傅大人");
+    expect(body.fullText).not.toContain("子隨元");
+  });
+
   it("entries link to their source ask; follow-ups survive history deletion", async () => {
     // save an entry carrying the ask link
     const e = await (

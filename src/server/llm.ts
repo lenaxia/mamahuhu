@@ -534,7 +534,7 @@ export class GatewayOcrService implements OcrService {
       const b64 = Buffer.from(bytes).toString("base64");
       const dims = parseImageDims(bytes);
       const system =
-        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style).
+        `You are an OCR engine for photos of Chinese text (Taiwan children's books included). Transcribe EVERY line of Han character text. Ignore bopomofo/zhuyin annotation symbols. Return ONLY valid JSON: {"skew":<number>,"items":[{"text":"…","box":[x1,y1,x2,y2],"dir":"h|v"}]}. "skew" = degrees the whole image must be rotated CLOCKWISE so the text lines become horizontal (0 when already upright; e.g. an over-the-shoulder shot of a diagonal letter ≈ 30-60). dir = the line's reading direction: "h" for horizontal left-to-right lines, "v" for vertical top-to-bottom columns (Taiwan/Japan style).
 CRITICAL — dir and box SHAPE must agree with the ACTUAL print layout, not the poster's orientation:
 - A horizontal line of N characters has a WIDE-SHORT box (width ≈ N × char height) and dir "h".
 - A vertical column of N characters has a TALL-NARROW box (height ≈ N × char width) and dir "v".
@@ -574,7 +574,7 @@ TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emi
         if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
 
         const lines: OcrLine[] = [];
-        const parsed = extractJson(raw) as { items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
+        const parsed = extractJson(raw) as { skew?: unknown; items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
         if (parsed?.items?.length) {
           for (const it of parsed.items) {
             if (typeof it.text !== "string" || !it.text.trim()) continue;
@@ -588,7 +588,8 @@ TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emi
           }
           if (lines.length) {
             const healed = dims ? normalizeBoxes(lines, dims.w, dims.h) : lines;
-            return { ok: true, value: { lines: healed } };
+            const skew = typeof parsed.skew === "number" && Number.isFinite(parsed.skew) && Math.abs(parsed.skew) <= 90 ? parsed.skew : undefined;
+            return { ok: true, value: { lines: healed, ...(skew !== undefined ? { skew } : {}) } };
           }
         }
       }
@@ -816,10 +817,20 @@ export class MockFollowUpService implements FollowUpService {
 }
 
 export class MockOcrService implements OcrService {
+  private skewedSeen = new Set<string>();
   available(): boolean { return true; }
-  async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
+  async extract(image: Blob): Promise<Result<{ lines: OcrLine[]; skew?: number }>> {
     // mock convention: uploads named plant*/blank* are textless (subject photos)
     const name = (image as File).name ?? "";
+    // uploads named skew*: first pass reports a 45° diagonal (fragmented text),
+    // second pass (after the server deskews) returns the clean line
+    if (/skew/i.test(name)) {
+      if (!this.skewedSeen.has(name)) {
+        this.skewedSeen.add(name);
+        return { ok: true, value: { lines: [{ text: "長信王之子隨元" }, { text: "子隨元" }], skew: 45 } };
+      }
+      return { ok: true, value: { lines: [{ text: "密呈太傅大人", box: [20, 30, 560, 110], dir: "h" }] } };
+    }
     if (/plant|blank|textless/i.test(name)) return { ok: true, value: { lines: [] } };
     // vertical: uploads named vertical* contain a top-to-bottom column
     if (/vertical/i.test(name)) {
