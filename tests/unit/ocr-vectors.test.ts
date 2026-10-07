@@ -91,6 +91,39 @@ describe("truncation salvage", () => {
   });
 });
 
+describe("grid→pixel conversion (the twice-bitten bug class)", () => {
+  it("fused box+vector items land in PIXEL space with dims (grid 0-1000 → image px)", () => {
+    const raw = JSON.stringify({ items: [
+      // horizontal line, grid box [100,100,500,150] on a 750×1000 image
+      { text: "定期舉辦", box: [100, 100, 500, 150], from: [100, 120], to: [500, 120] },
+      // diagonal line on the same image
+      { text: "密呈太傅", box: [600, 200, 800, 500], from: [618, 201], to: [776, 484] },
+    ] });
+    const lines = parseOcrVectors(raw, { w: 750, h: 1000 });
+    expect(lines).toHaveLength(2);
+    const h = lines[0]!;
+    // pixel space: grid 100→75, 500→375, y 100→100 (×1000/1000)
+    expect(h.from![0]).toBeCloseTo(75, 0);
+    expect(h.to![0]).toBeCloseTo(375, 0);
+    expect(h.box).toEqual([75, 100, 375, 150]);
+    expect(h.angle).toBe(0);
+    const d = lines[1]!;
+    expect(d.angle).toBeGreaterThan(45); // diagonal passes through
+    // centers/boxes within pixel bounds
+    for (const n of [...d.from!, ...d.to!, ...d.box!]) expect(n).toBeGreaterThanOrEqual(0);
+    for (const n of [...d.box!]) expect(n).toBeLessThanOrEqual(Math.max(750, 1000) + 60);
+  });
+
+  it("vector-only items still convert (the original fix stays fixed)", () => {
+    const raw = JSON.stringify({ items: [
+      { text: "親近自然", from: [100, 100], to: [500, 130] },
+    ] });
+    const lines = parseOcrVectors(raw, { w: 3024, h: 4032 });
+    expect(lines[0]!.from![0]).toBeCloseTo(302.4, 0);
+    expect(lines[0]!.to![0]).toBeCloseTo(1512, 0);
+  });
+});
+
 describe("chaining (continuation fragments)", () => {
   it("merges a tail fragment whose from == the parent line's to (the diagonal-letter failure)", () => {
     const raw = JSON.stringify({ items: [

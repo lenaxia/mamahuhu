@@ -557,10 +557,37 @@ export function parseOcrVectors(raw: string, _dims: { w: number; h: number } | n
     const text = it.text.trim();
     const f = Array.isArray(it.from) ? (it.from as unknown[]).map(Number) : null;
     const t = Array.isArray(it.to) ? (it.to as unknown[]).map(Number) : null;
+    const b4 = Array.isArray(it.box) ? (it.box as unknown[]).map(Number) : null;
+    const boxOk = b4 && b4.length === 4 && b4.every((n) => Number.isFinite(n)) && b4[0]! < b4[2]! && b4[1]! < b4[3]!;
     if (f && t && f.length === 2 && t.length === 2 && [...f, ...t].every((n) => Number.isFinite(n) && n >= -60 && n <= 1060)) {
       const len = Math.hypot(t[0]! - f[0]!, t[1]! - f[1]!);
       if (len < 3) continue;
-      const angle = snapAngle(Math.round((Math.atan2(t[1]! - f[1]!, t[0]! - f[0]!) * 180) / Math.PI));
+      let angle = snapAngle(Math.round((Math.atan2(t[1]! - f[1]!, t[0]! - f[0]!) * 180) / Math.PI));
+      // a SINGLE glyph has no intrinsic direction — its vector is noise
+      // (handwriting grids measured 41-49° per char). Always upright.
+      if ([...text].length === 1) angle = 0;
+      // BOTH contract fusion: the box carries precise EXTENTS (print layouts),
+      // the vector carries the AXIS (diagonals). Rebuild the baseline through
+      // the box center at the vector angle, with length from the box's span.
+      // Everything converts grid→PIXELS here — downstream speaks pixels only.
+      if (boxOk) {
+        const sx = _dims ? _dims.w / 1000 : 1;
+        const sy = _dims ? _dims.h / 1000 : 1;
+        const [bx1, by1, bx2, by2] = b4 as [number, number, number, number];
+        const bw = bx2 - bx1;
+        const bh = by2 - by1;
+        const fusedLen = Math.abs(angle) <= 20 ? bw : Math.abs(angle) >= 70 ? bh : Math.hypot(bw, bh);
+        const cx = (bx1 + bx2) / 2;
+        const cy = (by1 + by2) / 2;
+        const rad = (angle * Math.PI) / 180;
+        const half = fusedLen / 2;
+        const pf: [number, number] = [(cx - Math.cos(rad) * half) * sx, (cy - Math.sin(rad) * half) * sy];
+        const pt: [number, number] = [(cx + Math.cos(rad) * half) * sx, (cy + Math.sin(rad) * half) * sy];
+        if (fusedLen * Math.max(sx, sy) >= 3) {
+          lines.push({ text, from: pf, to: pt, angle, box: [bx1 * sx, by1 * sy, bx2 * sx, by2 * sy], dir: Math.abs(angle) > 45 ? "v" : "h" });
+          continue;
+        }
+      }
       // the model speaks a 0-1000 GRID; the overlay speaks PIXELS of the actual
       // image — convert here (normalizeBoxes only heals boxes, never vectors)
       const sx = _dims ? _dims.w / 1000 : 1;
@@ -649,11 +676,12 @@ export class GatewayOcrService implements OcrService {
       const dims = parseImageDims(bytes);
       const system =
         `You are an OCR engine. Find every block of Chinese text in the image. Return ONLY valid JSON, no prose:
-{"items":[{"text":"…","from":[x1,y1],"to":[x2,y2]}]}
-- from = point where the text block STARTS (start of its baseline); to = where it ENDS.
+{"items":[{"text":"…","box":[x1,y1,x2,y2],"from":[x1,y1],"to":[x2,y2]}]}
+- box = tight axis-aligned rectangle around the text block. from = start of the text baseline, to = its end.
 - Coordinates on a 0-1000 grid relative to the image (0,0 = top-left, 1000 = bottom-right).
-- The from→to vector must run ALONG the text's own axis: horizontal text → left-to-right vector; vertical text → top-to-bottom; diagonal text → its actual diagonal. A single standalone word is its own small block.
-- Text always reads from→to. Transcribe each block EXACTLY ONCE — never repeat text.`;
+- The from→to vector runs ALONG the text's own axis: horizontal left-to-right, vertical top-to-bottom, diagonal its actual diagonal.
+- ONE item per VISUAL line — never merge lines that print on separate rows.
+- Text reads from→to. Transcribe each block EXACTLY ONCE — never repeat text.`;
       const user = [
         { type: "text", text: "Transcribe the Chinese text blocks." },
         { type: "image_url", image_url: { url: `data:${image.type || "image/jpeg"};base64,${b64}` } },
