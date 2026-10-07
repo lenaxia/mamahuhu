@@ -532,6 +532,26 @@ export class UnavailableStt implements SttService {
  *  - phantom boxes: coordinates escaping the 0-1000 grid by >60 units → drop
  *  - boxless duplicates: cap at 3 (loops emit 5-20; real pages rarely repeat 4×)
  */
+/** Salvage complete items from a TRUNCATED JSON response (finish_reason=length):
+ *  dense pages legitimately exceed the token budget mid-list; the complete
+ *  items before the cut are still good OCR. */
+export function scrapeOcrItems(raw: string): { text?: unknown; box?: unknown; dir?: unknown }[] {
+  const out: { text?: unknown; box?: unknown; dir?: unknown }[] = [];
+  for (const m of raw.matchAll(/\{[^{}]*\}/g)) {
+    const blob = m[0];
+    const text = blob.match(/"text"\s*:\s*"([^"]*)"/);
+    if (!text || !text[1]!.trim()) continue;
+    const boxM = blob.match(/"box"\s*:\s*\[([^\]]*)\]/);
+    const dirM = blob.match(/"dir"\s*:\s*"(h|v)"/);
+    out.push({
+      text: text[1],
+      ...(boxM ? { box: boxM[1]!.split(",").map((n) => Number(n.trim())) } : {}),
+      ...(dirM ? { dir: dirM[1] } : {}),
+    });
+  }
+  return out;
+}
+
 export function healRepetition(lines: OcrLine[]): OcrLine[] {
   const inGrid = lines.filter((ln) => {
     if (!ln.box) return true;
@@ -568,6 +588,26 @@ export function healRepetition(lines: OcrLine[]): OcrLine[] {
 export class GatewayOcrService implements OcrService {
   constructor(private cfg: { base: string; key: string; model: string }) {}
   available(): boolean { return true; }
+
+  /** items (parsed or scraped) -> healed lines; skew pulled from raw when not in items */
+  private buildLines(items: { text?: unknown; box?: unknown; dir?: unknown }[], raw: string, dims: { w: number; h: number } | null): { lines: OcrLine[]; skew?: number } {
+    const lines: OcrLine[] = [];
+    for (const it of items) {
+      if (typeof it.text !== "string" || !it.text.trim()) continue;
+      const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
+      const box =
+        b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
+          ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
+          : undefined;
+      const dir = it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined;
+      lines.push({ text: it.text.trim(), box, dir });
+    }
+    const deduped = healRepetition(lines).slice(0, 60);
+    const healed = dims ? normalizeBoxes(deduped, dims.w, dims.h) : deduped;
+    const skewM = raw.match(/"skew"\s*:\s*(-?\d+(?:\.\d+)?)/);
+    const skew = skewM && Math.abs(Number(skewM[1])) <= 90 ? Number(skewM[1]) : undefined;
+    return { lines: healed, ...(skew !== undefined ? { skew } : {}) };
+  }
   async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
     try {
       const bytes = new Uint8Array(await image.arrayBuffer());
@@ -597,7 +637,7 @@ TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emi
           body: JSON.stringify({
             model: this.cfg.model,
             temperature: 0,
-            max_tokens: 3000,
+            max_tokens: 6000,
             messages: attempt === 0
               ? [{ role: "system", content: system }, { role: "user", content: user }]
               : [
@@ -613,35 +653,25 @@ TRANSCRIBE EACH LINE/COLUMN EXACTLY ONCE: never repeat text you have already emi
         const choice = data.choices?.[0];
         raw = choice?.message?.content ?? "";
         if (!raw.trim()) return { ok: false, error: "ocr returned no text" };
-        // truncation → the JSON cannot be balanced; retry instead of parsing a corpse
-        if (choice?.finish_reason === "length") continue;
+        // truncation → the JSON cannot be balanced, but the complete items
+        // before the cut are good — salvage them, retry only if none
+        if (choice?.finish_reason === "length") {
+          const salvaged = scrapeOcrItems(raw);
+          if (salvaged.length) return { ok: true, value: this.buildLines(salvaged, raw, dims) };
+          continue;
+        }
 
-        const lines: OcrLine[] = [];
         const parsed = extractJson(raw) as { skew?: unknown; items?: { text?: string; box?: unknown; dir?: unknown }[] } | null;
         if (parsed?.items?.length) {
-          for (const it of parsed.items) {
-            if (typeof it.text !== "string" || !it.text.trim()) continue;
-            const b = Array.isArray(it.box) ? it.box.map(Number) : undefined;
-            const box =
-              b && b.length === 4 && b.every((n) => Number.isFinite(n)) && b[0]! < b[2]! && b[1]! < b[3]!
-                ? ([b[0]!, b[1]!, b[2]!, b[3]!] as [number, number, number, number])
-                : undefined;
-            const dir = it.dir === "v" ? "v" : it.dir === "h" ? "h" : undefined;
-            lines.push({ text: it.text.trim(), box, dir });
-          }
-          if (lines.length) {
-            // degenerate repetition healed GEOMETRICALLY (marching clones die,
-            // genuine repeated text survives) + a sanity cap
-            const deduped = healRepetition(lines).slice(0, 60);
-            const healed = dims ? normalizeBoxes(deduped, dims.w, dims.h) : deduped;
-            const skew = typeof parsed.skew === "number" && Number.isFinite(parsed.skew) && Math.abs(parsed.skew) <= 90 ? parsed.skew : undefined;
-            return { ok: true, value: { lines: healed, ...(skew !== undefined ? { skew } : {}) } };
-          }
+          const built = this.buildLines(parsed.items, raw, dims);
+          if (built.lines.length) return { ok: true, value: built };
         }
       }
 
-      // final fallback: plain-text lines, no boxes — but NEVER raw JSON
-      if (/^\s*\{/ .test(raw) || raw.includes('"items"')) {
+      // last resort: scrape any complete items out of unparseable JSON
+      if (/\s*\{/ .test(raw) || raw.includes('"items"')) {
+        const salvaged = scrapeOcrItems(raw);
+        if (salvaged.length) return { ok: true, value: this.buildLines(salvaged, raw, dims) };
         return { ok: false, error: "ocr returned unusable JSON (repetition/truncation)" };
       }
       const plain = raw

@@ -48,3 +48,13 @@ describe("healRepetition (geometric clone detection)", () => {
     expect(out.map((l) => l.text)).toEqual(["虎符", "虎符", "虎符", "調兵"]);
   });
 });
+
+describe("scrapeOcrItems (truncated-JSON salvage)", () => {
+  it("recovers complete items from a cut-off response and drops the partial tail", async () => {
+    const { scrapeOcrItems } = await import("../../src/server/llm");
+    const raw = `{"skew":12,"items":[{"text":"密呈太傅大人","box":[100,100,300,150],"dir":"h"},{"text":"卑職日夜奔波","box":[100,200,400,250],"dir":"h"},{"text":"虎符在長信","box":[100,3`;
+    const items = scrapeOcrItems(raw);
+    expect(items).toHaveLength(2); // third item truncated mid-box — dropped
+    expect(items[0]).toMatchObject({ text: "密呈太傅大人", dir: "h" });
+  });
+});
