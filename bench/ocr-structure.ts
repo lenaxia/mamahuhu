@@ -10,7 +10,7 @@ import { fuseStructure, parseStructureLines, type ClassicalItem } from "../src/s
 const CACHE = "/tmp/opencode/fusion-cache";
 
 const names = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const all = names.length ? names : ["letter-4920", "letter-4919", "letter-diagonal", "poster-flat", "grid-handwriting", "banner-insitu", "wordcloud-color", "curve-arc", "curve-s"];
+const all = names.length ? names : ["letter-4920", "letter-4921", "letter-4919", "letter-diagonal", "poster-flat", "grid-handwriting", "banner-insitu", "wordcloud-color", "curve-arc", "curve-s"];
 
 const summary: { name: string; chars: number; anchored: number; interp: number; extrap: number; unanchoredLines: number; llmLines: number; classicalItems: number; unmatched: number; oob: number; angles: string }[] = [];
 

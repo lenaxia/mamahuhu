@@ -366,8 +366,24 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     expect(body.askId).toBeTruthy();
   });
 
-  it("vector OCR lines distribute word cells along the axis and carry angle", async () => {
+  it("CLASSICAL box-only results with many words stay positioned (the poster demotion regression)", async () => {
+    // v0.5.2's demotion guard had an absent-angles branch that demoted EVERY
+    // classical-served result (boxes>0.5 && angles<3) — owner lost all poster
+    // overlays. The mock's default line is <6 words so it never tripped; this
+    // scenario has 8+ box-only words like a real poster.
     const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 5, g: 5, b: 5 } } }).png().toBuffer();
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "classical-poster.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.positioned).toBe(true);
+    const boxed = body.lines.flatMap((l: { words: { box?: number[] }[] }) => l.words).filter((w: { box?: number[] }) => w.box);
+    expect(boxed.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("vector OCR lines distribute word cells along the axis and carry angle", async () => {    const sharp = (await import("sharp")).default;
     const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 5, g: 5, b: 5 } } }).png().toBuffer();
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "vector-diagonal.png");

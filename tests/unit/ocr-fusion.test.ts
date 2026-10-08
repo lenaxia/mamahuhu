@@ -256,6 +256,38 @@ describe("layout inference (classical missing lines entirely)", () => {
     expect(x).toBeLessThan(400); // left of the last column (reading order r→l)
   });
 
+  it("spatial-coherence prune: a distant stamp fragment matching the line's tail is dropped", () => {
+    // IMG_4921 measured: 确爲真品現此调 column + the 虎符虎符 stamp 660px away
+    // textually matching the line's last chars — must NOT stretch the line
+    const r = fuseStructure(
+      [item("确為真品現此调", [385, 657, 558, 1052]), item("虎符", [1129, 1482, 1299, 1660])],
+      [line(1, "確為真品現此調兵虎符", "v")],
+    );
+    const l = r.lines[0]!;
+    expect(l.matchedFragments).toEqual([0]); // stamp not claimed
+    expect(r.unmatchedFragments.map((f) => f.text)).toEqual(["虎符"]);
+    const boxes = l.chars.filter((c) => c.anchored && c.box).map((c) => c.box!);
+    const maxX = Math.max(...boxes.map((b) => b[2]));
+    expect(maxX).toBeLessThan(640); // line stays in its column, not stretched to the stamp
+    // but a classical-MISSED middle (few pitches over the same char count) survives
+    const r2 = fuseStructure([item("甲乙", [0, 0, 100, 100]), item("己", [0, 500, 100, 600])], [line(1, "甲乙丙丁戊己")]);
+    expect(r2.lines[0]!.matchedFragments).toEqual([0, 1]); // 4-pitch gap over 4 chars = sane
+  });
+
+  it("inference feasibility: lines that would overlap an anchored column stay loose", () => {
+    // three unanchored lines between two anchored columns only ~96px apart
+    // (24px spacing vs ~100px pitch — the IMG_4921 stack) → loose, not stacked
+    const r = fuseStructure(
+      [item("甲乙", [760, 100, 840, 300]), item("戊己", [664, 100, 744, 300])],
+      [line(1, "甲乙", "v"), line(2, "子丑", "v"), line(3, "寅卯", "v"), line(4, "辰巳", "v"), line(5, "戊己", "v")],
+    );
+    const l2 = r.lines[1]!, l3 = r.lines[2]!, l4 = r.lines[3]!;
+    expect(l2.inferred).toBeUndefined(); // refused — would overlap
+    expect(l2.chars.every((c) => !c.box)).toBe(true);
+    expect(l3.chars.every((c) => !c.box)).toBe(true);
+    expect(l4.chars.every((c) => !c.box)).toBe(true);
+  });
+
   it("no anchored neighbors at all → stays loose (no inference from nothing)", () => {
     const r = fuseStructure([], [line(1, "日夜奔波", "v")]);
     expect(r.lines[0]!.inferred).toBeUndefined();

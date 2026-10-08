@@ -170,3 +170,46 @@ describe("chaining (continuation fragments)", () => {
     expect(lines).toHaveLength(2);
   });
 });
+
+describe("classicalLines reading order (the poster swap regression)", () => {
+  // imported here to keep the fusion suite self-contained; classicalLines is pure
+  it("rows sort top→bottom even when the detector emits them swapped; vertical columns right→left", async () => {
+    const { classicalLines } = await import("../../src/server/ocr-ladder");
+    const items = [
+      // poster-like: row 2 emitted BEFORE row 1, 20px row pitch under padded boxes
+      { box: [261, 628, 468, 684] as [number, number, number, number], text: "堂里认识动植物", score: 0.99 },
+      { box: [262, 608, 478, 664] as [number, number, number, number], text: "带领孩子采蘑菇", score: 0.99 },
+      { box: [166, 433, 251, 469] as [number, number, number, number], text: "亲近自然", score: 1.0 },
+    ];
+    const out = classicalLines(items);
+    expect(out.map((l) => l.text)).toEqual(["亲近自然", "带领孩子采蘑菇", "堂里认识动植物"]);
+    // same-row fragments order left→right
+    const row = classicalLines([
+      { box: [200, 100, 300, 145] as [number, number, number, number], text: "右半", score: 0.9 },
+      { box: [50, 100, 150, 145] as [number, number, number, number], text: "左半", score: 0.9 },
+    ]);
+    expect(row.map((l) => l.text)).toEqual(["左半", "右半"]);
+    // vertical columns: rightmost first (traditional reading)
+    const v = classicalLines([
+      { box: [100, 100, 150, 300] as [number, number, number, number], text: "左列文字", score: 0.9 },
+      { box: [300, 100, 350, 300] as [number, number, number, number], text: "右列文字", score: 0.9 },
+    ]);
+    expect(v.map((l) => l.dir)).toEqual(["v", "v"]);
+    expect(v.map((l) => l.text)).toEqual(["右列文字", "左列文字"]);
+  });
+});
+
+describe("fullZh echo guard (nonsense-grid boundary)", () => {
+  it("a Han-majority response is rejected as echo, not served as a translation", async () => {
+    const { LlmTranslationService } = await import("../../src/server/llm");
+    const echoClient = { complete: async () => ({ ok: true as const, value: "合侗蕈崩則\n粲韻波瀛登" }) };
+    const svc = new LlmTranslationService(echoClient as never, "default");
+    const res = await svc.fullZh("合侗蕈崩則");
+    expect(res.ok).toBe(false);
+    const good = { complete: async () => ({ ok: true as const, value: "A grid of practice characters." }) };
+    const svc2 = new LlmTranslationService(good as never, "default");
+    const res2 = await svc2.fullZh("合侗蕈崩則");
+    expect(res2.ok).toBe(true);
+    if (res2.ok) expect(res2.value).toContain("practice characters");
+  });
+});

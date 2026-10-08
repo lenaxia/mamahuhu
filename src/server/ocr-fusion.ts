@@ -266,7 +266,7 @@ function axisFromBox(f: { box: [number, number, number, number]; chars: string[]
 
 // ---------- fusion ----------
 
-export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[]): FusionResult {
+export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[], dims?: { w: number; h: number }): FusionResult {
   // frags stay INDEX-ALIGNED with items (f.idx === array index) — empty-text
   // fragments simply generate no candidates; a filtered array would scramble
   // every frags[idx] lookup (the 4919 misalignment bug)
@@ -434,6 +434,33 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
     const { ux, uy } = axisOverride ?? own;
     const fromLLM = axisOverride ? false : own.fromLLM;
     anchors = chains[li]!.map((c) => mkAnchor(c, { ux, uy })).sort((a, b) => a.oStart - b.oStart);
+    // SPATIAL COHERENCE PRUNE: consecutive anchors must be CONTIGUOUS along
+    // the axis — a textually-matching fragment hundreds of pixels away (the
+    // 虎符虎符 stamp anchoring a column's tail from across the page, measured
+    // on IMG_4921) stretches the line AND poisons page-evidence. Metric is
+    // gap PER CHAR-OFFSET between the anchors: a classical-missed middle
+    // (4 pitches over 4 missing chars = 1×) is legit; a 660px jump over ONE
+    // char step is not. Drop the weaker anchor; iterate (each drop re-derives).
+    for (let pass = 0; pass < 4 && anchors.length >= 2; pass++) {
+      let worst = -1, worstExcess = 0;
+      for (let k = 0; k + 1 < anchors.length; k++) {
+        const a = anchors[k]!, b = anchors[k + 1]!;
+        const gap = Math.hypot(b.pStart[0] - a.pEnd[0], b.pStart[1] - a.pEnd[1]);
+        const dOff = Math.max(1, b.oStart - (a.oEnd - 1));
+        const perChar = gap / dOff;
+        const limit = 3 * Math.max(a.pitch, b.pitch);
+        const excess = perChar / limit;
+        if (perChar > limit && excess > worstExcess) { worstExcess = excess; worst = k; }
+      }
+      if (worst < 0) break;
+      const a = anchors[worst]!, b = anchors[worst + 1]!;
+      const drop = (a.oEnd - a.oStart) < (b.oEnd - b.oStart) ? a : b; // fewer covered chars = weaker
+      anchors = anchors.filter((x) => x !== drop);
+    }
+    if (!anchors.length) {
+      // every anchor pruned as incoherent — the line is honestly unanchored
+      return mk(ln.cleanChars.map((c) => ({ char: c, anchored: false })), null, true, []);
+    }
 
     const chars: FusedChar[] = ln.cleanChars.map((ch, oi) => {
       const offset = ln.offsets[oi]!;
@@ -487,7 +514,10 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
     if (cnt === 0) { ax = ux; ay = uy; cnt = 1; }
     const angle = Math.round((Math.atan2(ay / cnt, ax / cnt) * 180) / Math.PI);
 
-    return mk(chars, angle, fromLLM, chains[li]!.map((c) => c.frag));
+    // matchedFragments mirrors the PRUNED anchors (the spatial-coherence
+    // prune above may drop chain candidates — 4921: the 虎符虎符 stamp — and
+    // page-evidence counting + unmatched reporting must agree with the geometry
+    return mk(chars, angle, fromLLM, [...new Set(anchors.map((a) => a.frag.idx))]);
   };
 
   let outLines: FusedLine[] = lines.map((_, li) => assemble(li));
@@ -565,6 +595,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
         const colGap = gaps.length ? gaps[Math.floor(gaps.length / 2)]! : pitch * 1.2;
         const startAlong = [...info].map((i) => alongOf(i.start)).sort((a, b) => a - b);
         const baseAlong = startAlong[Math.floor(startAlong.length / 2)]!; // columns start near a common top
+        const placedCrosses = info.map((i) => crossOf(i.center)); // feasibility: inferred lines may not overlap these
         outLines = outLines.map((l) => {
           if (l.angle !== null || !l.chars.length) return l;
           // nearest anchored neighbors in line order
@@ -575,14 +606,29 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
           else if (before) cross = crossOf(before.center) + sign * colGap;
           else if (after) cross = crossOf(after.center) - sign * colGap;
           else return l;
+          // PHYSICAL FEASIBILITY: n-interpolation assumes uniform column
+          // spacing — real columns can't sit closer than ~one pitch. If the
+          // interpolated slot overlaps an anchored (or already inferred)
+          // column, the honest output is the loose-words list, not a wrong
+          // box (measured on IMG_4921: three lines packed into 176px = 44px
+          // spacing vs 60px pitch, stacked on the anchored columns).
+          const placed = placedCrosses.filter((pc) => Math.abs(pc - cross) < 0.9 * pitch);
+          if (placed.length) return l;
           // place chars along the page axis from the common start
           const chars: FusedChar[] = l.chars.map((c, k) => {
             const along = baseAlong + (k + 0.5) * pitch;
-            const px = ax * along + cxn * cross;
-            const py = ay * along + cyn * cross;
+            let px = ax * along + cxn * cross;
+            let py = ay * along + cyn * cross;
             const hp = pitch / 2;
+            // clamp to the image so a degenerate estimate can't push chips
+            // off-screen (owner-measured on IMG_4921)
+            if (dims) {
+              px = Math.max(hp - 40, Math.min(dims.w - hp + 40, px));
+              py = Math.max(hp - 40, Math.min(dims.h - hp + 40, py));
+            }
             return { char: c.char, box: [Math.round(px - hp), Math.round(py - hp), Math.round(px + hp), Math.round(py + hp)], anchored: false };
           });
+          placedCrosses.push(cross);
           return { ...l, chars, angle: medAngle, inferred: true };
         });
       }

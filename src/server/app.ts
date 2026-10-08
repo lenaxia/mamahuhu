@@ -721,8 +721,12 @@ async function buildPhrase(
         // are a dictionary limitation (period vocabulary), not an overlay
         // quality problem (letter-4920: 72% singles but angles 51-68° = tight
         // cluster = well-placed rotated chips). Scatter = model guessing.
+        // NOTE: no "absent angles" branch — classical-served results are ALL
+        // box-only (angles come from vector/fusion rungs) and a boxes>0.5 &&
+        // angles<3 test demoted every classical poster to list layout
+        // (owner-measured). The fragment-soup case it guarded for is now
+        // rejected upstream by the ladder's grouping-coherence gate.
         const angles = allWords.filter((w) => w.angle !== undefined).map((w) => w.angle!);
-        const boxes = allWords.filter((w) => w.box !== undefined);
         if (angles.length >= 6) {
           const am = angles.reduce((s: number, a: number) => s + a, 0) / angles.length;
           const asd = Math.sqrt(angles.reduce((s: number, a: number) => s + (a - am) ** 2, 0) / angles.length);
@@ -731,10 +735,6 @@ async function buildPhrase(
             for (const l of lines) for (const w of l.words) w.box = undefined;
             positioned = false;
           }
-        } else if (boxes.length > 0 && boxes.length / allWords.length > 0.5 && angles.length < 3) {
-          // no angle data at all (classical axis boxes on non-axis text)
-          for (const l of lines) for (const w of l.words) w.box = undefined;
-          positioned = false;
         }
       }
     }
@@ -765,10 +765,19 @@ async function buildPhrase(
   });
 
   /** full English translation for photos/PDFs — the LLM decides when it adds
-   *  anything beyond the word chips ("" = omit) */
+   *  anything beyond the word chips ("" = omit). The NONE decision is a model
+   *  judgment that is UNSTABLE on boundary content (nonsense grids flip
+   *  NONE/echo across gateway backends — bench/ab-fullzh.mts): honor it only
+   *  for genuinely short text; longer text gets one more sample. */
   const fullTranslation = async (fullText: string): Promise<string | undefined> => {
     const res = await deps.translations.fullZh(fullText.trim());
-    return res.ok && res.value ? res.value : undefined;
+    if (res.ok && res.value) return res.value;
+    const han = [...fullText].filter((c) => /\p{Script=Han}/u.test(c)).length;
+    if (res.ok && !res.value && han <= 6) return undefined; // NONE honored: one short phrase
+    // longer text deterministically deserves a card — bypass the unstable
+    // NONE decision (never used where NONE is honored, so no regression path)
+    const forced = await deps.translations.fullZh(fullText.trim(), { force: true });
+    return forced.ok && forced.value ? forced.value : undefined;
   };
 
   const identifyTags = async (rawBytes: Uint8Array | Buffer): Promise<(z.infer<typeof IdentifySchema> & { bpmf: string })[]> => {

@@ -83,11 +83,25 @@ export function classicalLines(items: RapidItem[]): OcrLine[] {
     const tall = bh > bw * 1.3 && [...i.text].length > 1;
     return { text: i.text, box: [Math.round(i.box[0]), Math.round(i.box[1]), Math.round(i.box[2]), Math.round(i.box[3])], dir: tall ? ("v" as const) : ("h" as const) };
   });
-  const horizontal = lines.filter((l) => l.dir === "h");
-  const vertical = lines.filter((l) => l.dir === "v");
-  horizontal.sort((a, b) => (Math.abs(a.box![1] - b.box![1]) > (a.box![3] - a.box![1]) * 0.7 ? a.box![1] - b.box![1] : a.box![0] - b.box![0]));
-  vertical.sort((a, b) => (Math.abs(b.box![0] - a.box![0]) > (b.box![2] - b.box![0]) * 0.7 ? b.box![0] - a.box![0] : a.box![1] - b.box![1]));
-  return [...horizontal, ...vertical];
+  // READING ORDER: rows top→bottom, left→right within a row; vertical columns
+  // right→left, top→bottom within a column. Bands are CENTER-based, quantized
+  // by a fraction of the median extent — the old |y1 diff| > 0.7×height rule
+  // never banded real paragraph rows 20px apart under 45-56px padded boxes and
+  // silently fell back to detector order, which arrived swapped (measured on
+  // poster-flat: 堂里… printed before 带领…在自然课).
+  const banded = (ls: OcrLine[], axis: "y" | "x", reverseBands: boolean): OcrLine[] => {
+    if (ls.length < 2) return ls;
+    const ext = (l: OcrLine) => (axis === "y" ? l.box![3] - l.box![1] : l.box![2] - l.box![0]);
+    const exts = ls.map(ext).sort((a, b) => a - b);
+    const tol = Math.max(4, 0.3 * exts[Math.floor(ls.length / 2)]!);
+    const center = (l: OcrLine) => (axis === "y" ? (l.box![1] + l.box![3]) / 2 : (l.box![0] + l.box![2]) / 2);
+    return [...ls].sort((a, b) => {
+      const ka = Math.round(center(a) / tol), kb = Math.round(center(b) / tol);
+      if (ka !== kb) return reverseBands ? kb - ka : ka - kb;
+      return axis === "y" ? a.box![0] - b.box![0] : a.box![1] - b.box![1];
+    });
+  };
+  return [...banded(lines.filter((l) => l.dir === "h"), "y", false), ...banded(lines.filter((l) => l.dir === "v"), "x", true)];
 }
 
 
@@ -222,7 +236,7 @@ export class LadderOcrService implements OcrService {
           const { fuseStructure, parseStructureLines, fusedToOcrLines } = await import("./ocr-fusion");
           const raw = await this.chat(STRUCTURE_SYSTEM, Buffer.from(bytes).toString("base64"), 4000);
           const structure = parseStructureLines(raw);
-          const result = fuseStructure(items, structure);
+          const result = fuseStructure(items, structure, { w, h });
           const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
           const anchoredChars = result.lines.reduce((s, l) => s + l.chars.filter((c) => c.anchored).length, 0);
           if (totalChars > 0 && anchoredChars >= 6 && anchoredChars / totalChars >= 0.2) {

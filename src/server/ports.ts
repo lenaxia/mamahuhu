@@ -55,7 +55,7 @@ export interface TranslationService {
   glossZh(text: string): Promise<Result<string>>;
   /** complete English translation of multi-phrase Chinese text (zh→en),
    *  context-aware: the model groups lines by meaning, not layout */
-  fullZh(text: string): Promise<Result<string>>;
+  fullZh(text: string, opts?: { force?: boolean }): Promise<Result<string>>;
   /** answer a zh meta-question about language (how-to-say / what-does-it-mean) in one English line */
   answerZh(text: string): Promise<Result<string>>;
 }

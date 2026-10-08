@@ -252,19 +252,27 @@ export class LlmTranslationService implements TranslationService {
     return gloss ? { ok: true, value: gloss } : { ok: false, error: "empty gloss" };
   }
 
-  async fullZh(text: string): Promise<Result<string>> {
+  async fullZh(text: string, opts?: { force?: boolean }): Promise<Result<string>> {
+    const system = opts?.force
+      ? `Translate this Chinese text into natural English. The text may be Mandarin OR colloquial Cantonese (口語) and may contain line breaks from a photo. It is NOT a single word — a card is needed. If the characters are unrelated (a practice grid, random or archaic characters), describe what they are and give each character's meaning. Otherwise reply with ONLY the complete translation: join lines that form one sentence, keep separate items on their own lines. No notes, no Chinese.`
+      : `Translate this Chinese text into natural English. The text may be Mandarin OR colloquial Cantonese (口語) and may contain line breaks from a photo.
+DECIDE FIRST: if the text is a single word or a short standalone phrase (something a dictionary entry alone would explain), reply with exactly NONE — no translation needed. Otherwise reply with ONLY the complete translation: join lines that form one sentence, keep separate items (bullets, lists, slogans) on their own lines. No notes, no Chinese.`;
     const res = await this.chat.complete(
       [
-        { role: "system", content: `Translate this Chinese text into natural English. The text may be Mandarin OR colloquial Cantonese (口語) and may contain line breaks from a photo.
-DECIDE FIRST: if the text is a single word or a short standalone phrase (something a dictionary entry alone would explain), reply with exactly NONE — no translation needed. Otherwise reply with ONLY the complete translation: join lines that form one sentence, keep separate items (bullets, lists, slogans) on their own lines. No notes, no Chinese.` },
+        { role: "system", content: system },
         { role: "user", content: text },
       ],
       { model: this.model, temperature: 0.2, maxTokens: 400 },
     );
     if (!res.ok) return res;
-    const full = res.value.trim().replace(/^["'「」]+|["'「」]+$/g, "");
+    const full = res.value.trim().replace(/^["'「」]+|["'」]+$/g, "");
     if (!full) return { ok: false, error: "empty translation" };
     if (/^none\.?$/i.test(full)) return { ok: true, value: "" }; // "" = omit (LLM decided single-phrase)
+    // echo guard: a backend that repeats the Chinese back is NOT a translation
+    // (measured on nonsense grids: gateway routers flip NONE/echo/translate —
+    // bench/ab-fullzh.mts). Han-majority response = failure, caller may retry.
+    const han = [...full].filter((c) => /\p{Script=Han}/u.test(c)).length;
+    if (han > 0 && han / [...full].length > 0.5) return { ok: false, error: "echo (not a translation)" };
     return { ok: true, value: full };
   }
 
@@ -998,6 +1006,21 @@ export class MockOcrService implements OcrService {
         value: { lines: [
           { text: "床前明月光", from: [100, 100], to: [500, 300], angle: 27 },
           { text: "疑是地上霜", box: [100, 400, 500, 500], dir: "h" },
+        ] },
+      };
+    }
+    // uploads named classical*: exercise the box-only classical contract at
+    // poster scale (8+ words) — positioned must SURVIVE (demotion regression)
+    if (/classical/i.test(name)) {
+      return {
+        ok: true, value: { lines: [
+          { text: "親近自然", box: [10, 10, 190, 60], dir: "h" },
+          { text: "定期舉辦野營活動", box: [10, 70, 390, 110], dir: "h" },
+          { text: "讓孩子們在帳篷", box: [10, 130, 330, 170], dir: "h" },
+          { text: "和簧火中學習", box: [10, 190, 250, 230], dir: "h" },
+          { text: "探索發現", box: [10, 250, 190, 300], dir: "h" },
+          { text: "帶領孩子采蘑菇", box: [10, 320, 330, 360], dir: "h" },
+          { text: "健康成長", box: [10, 380, 190, 430], dir: "h" },
         ] },
       };
     }
