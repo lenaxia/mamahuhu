@@ -191,15 +191,16 @@ export class LadderOcrService implements OcrService {
       eligible = classicalSufficient(items);
       const b64 = Buffer.from(bytes).toString("base64");
 
-      // FUSION ROUTING (OCR_FUSION=1): classical boxes NEVER serve directly —
+      // UNIFIED PIPELINE (OCR_FUSION=1): classical boxes NEVER serve directly —
       // an AABB cannot represent rotated text (the owner's diagonal letter
       // served overlapping raw boxes through the old "classical sufficient"
-      // branch). classicalSufficient now means fusion-ELIGIBLE: line structure
-      // exists to align the structure-LLM text onto. Fragment soup / clouds /
-      // empty → vector rung (measured better there). Fusion serves only when
-      // anchoring is substantial (≥20% of chars, ≥6 chars).
+      // branch). EVERY photo with classical items goes through fusion; the
+      // ≥20% anchored serve-gate is the single quality valve, the vector rung
+      // catches whatever fusion can't anchor. No eligibility pre-filter —
+      // every routing exception this far was measured optimization, not
+      // correctness, and each one caused a routing surprise.
       if (process.env.OCR_FUSION === "1" && this.chatCfg) {
-        if (items.length > 0 && eligible) {
+        if (items.length > 0) {
           try {
             const { fuseStructure, parseStructureLines, fusedToOcrLines } = await import("./ocr-fusion");
             const raw = await this.chat(STRUCTURE_SYSTEM, b64, 4000);
