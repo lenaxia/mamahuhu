@@ -47,13 +47,32 @@ export class RapidOcrService {
   }
 }
 
-/** gate: is the classical pass good enough to serve alone? */
+/** gate: is the classical pass good enough to serve alone?
+ *  Two failure classes measured on the bench:
+ *  1. confident-wrong: high CTC scores on hard script (scores alone lie)
+ *  2. fragment soup: the detector groups diagonal/handwritten text into
+ *     single-char fragments with wild pitch variance — useless for lines/chips
+ *     even when each fragment reads correctly (letter-4919: 29 fragments,
+ *     pitch 39-153px). So the gate requires GROUPING COHERENCE as well:
+ *     median >=3 chars/item, pitch CV <=0.6, single-char fraction <=50%. */
 export function classicalSufficient(items: RapidItem[]): boolean {
   if (items.length === 0) return false;
   const conf = items.filter((i) => i.score >= 0.75);
   const mean = items.reduce((s, i) => s + i.score, 0) / items.length;
   const chars = items.reduce((s, i) => s + [...i.text].length, 0);
-  return conf.length >= 3 && mean >= 0.78 && chars >= 8;
+  if (!(conf.length >= 3 && mean >= 0.78 && chars >= 8)) return false;
+  // grouping coherence
+  const itemChars = items.map((i) => [...i.text].length).sort((a, b) => a - b);
+  const median = itemChars[Math.floor(itemChars.length / 2)]!;
+  const singles = itemChars.filter((n) => n === 1).length / itemChars.length;
+  const pitches = items.filter((i) => [...i.text].length >= 2).map((i) => (i.box[2] - i.box[0]) / [...i.text].length);
+  if (median < 3 || singles > 0.5) return false;
+  if (pitches.length >= 3) {
+    const pm = pitches.reduce((s, p) => s + p, 0) / pitches.length;
+    const pv = Math.sqrt(pitches.reduce((s, p) => s + (p - pm) ** 2, 0) / pitches.length);
+    if (pm > 0 && pv / pm > 0.6) return false;
+  }
+  return true;
 }
 
 /** classical lines → OcrLine (pixel boxes, deterministic reading order, aspect angle) */

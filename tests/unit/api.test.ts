@@ -374,12 +374,13 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.positioned).toBe(true);
     const words = body.lines.flatMap((l: { words: { traditional: string; angle?: number; box?: number[] }[] }) => l.words);
     const moon = words.find((w: { traditional: string }) => w.traditional === "月光");
     expect(moon?.angle).toBe(27); // diagonal angle flows to the client
-    const frost = words.find((w: { traditional: string }) => w.traditional === "地上");
-    expect(frost?.box?.[0]).toBeGreaterThan(100); // legacy box line still distributes
+    // small fixture (5+5 chars over 2 lines) trips the fragmentation demotion
+    // guard by design — boxes are stripped to the list layout, but the angle
+    // contract still flows to the client
+    expect(body.positioned).toBe(false);
   });
 
   it("entries link to their source ask; follow-ups survive history deletion", async () => {
@@ -781,5 +782,37 @@ describe("SRS review", () => {
     });
     const after = await (await app.request("/api/review/due", { headers: H })).json();
     expect(after.some((e: { id: string }) => e.id === target.id)).toBe(false);
+  });
+});
+
+describe("version surface", () => {
+  it("GET /healthz reports a semver version", async () => {
+    const res = await app.request("/healthz");
+    const j = await res.json();
+    expect(j.version).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+});
+
+describe("classical gate grouping coherence", () => {
+  it("poster-like output passes (long lines, uniform pitch)", async () => {
+    const { classicalSufficient } = await import("../../src/server/ocr-ladder");
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      box: [100, 100 + i * 60, 100 + 8 * 45, 150 + i * 60] as [number, number, number, number],
+      text: "定期舉辦野營活動讓", score: 0.95,
+    }));
+    expect(classicalSufficient(items)).toBe(true);
+  });
+
+  it("fragment soup fails (single chars, wild pitch) — the letter-4919 failure", async () => {
+    const { classicalSufficient } = await import("../../src/server/ocr-ladder");
+    const items = [
+      { box: [100, 100, 146, 150] as [number, number, number, number], text: "今", score: 0.9 },
+      { box: [200, 300, 353, 360] as [number, number, number, number], text: "太", score: 0.9 },
+      { box: [50, 500, 330, 560] as [number, number, number, number], text: "調兵虎符事如", score: 0.9 },
+      { box: [400, 700, 690, 760] as [number, number, number, number], text: "職多方查證", score: 0.9 },
+      { box: [10, 900, 300, 960] as [number, number, number, number], text: "確為", score: 0.9 },
+      { box: [500, 1100, 580, 1160] as [number, number, number, number], text: "傅", score: 0.9 },
+    ];
+    expect(classicalSufficient(items)).toBe(false);
   });
 });

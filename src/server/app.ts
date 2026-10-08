@@ -691,6 +691,23 @@ async function buildPhrase(
       }
       if (words.length) lines.push({ words });
     }
+    // geometry coherence: when even the LLM rung fragments (single-char words,
+    // scattered angles — measured on handwritten diagonal letters), on-image
+    // chips can only misalign. Demote to the list layout: photo + cards.
+    {
+      const allWords = lines.flatMap((l: { words: z.infer<typeof OcrWordSchema>[] }) => l.words);
+      if (allWords.length >= 6) {
+        const singles = allWords.filter((w) => [...w.traditional].length === 1).length / allWords.length;
+        const lineLens = lines.map((l: { words: z.infer<typeof OcrWordSchema>[] }) => l.words.reduce((s: number, w: z.infer<typeof OcrWordSchema>) => s + [...w.traditional].length, 0)).sort((a: number, b: number) => a - b);
+        const medianLine = lineLens[Math.floor(lineLens.length / 2)] ?? 0;
+        // fragmented BOTH ways measured: mostly single-char words OR no line
+        // longer than 3 chars → geometry cannot be trusted, chips would mislead
+        if (singles > 0.6 || medianLine <= 2) {
+          for (const l of lines) for (const w of l.words) w.box = undefined;
+          positioned = false;
+        }
+      }
+    }
     if (lines.length === 0) {
       // textless photo → tag every subject; client offers circle-to-refine
       const tags = await identifyTags(nBytes);
