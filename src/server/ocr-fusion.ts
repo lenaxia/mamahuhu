@@ -239,17 +239,19 @@ function axisOf(anchors: Anchor[], dir: "h" | "v"): { ux: number; uy: number; fr
  *  labeled "h". A strip of m glyphs in a w×h AABB that is NOT a clean row/
  *  column is a LEANING strip: hypot(w,h) ≈ m·g + g·√2 solves the glyph size,
  *  the along-axis extent solves the slant (letter-4920: a 313px-wide diagonal
- *  column previously placed straight down its center-x). */
-function axisFromBox(f: { box: [number, number, number, number]; chars: string[] }, dir: "h" | "v"): { ux: number; uy: number } {
+ *  column previously placed straight down its center-x). `lean` marks the
+ *  unambiguous strip case — callers use it to decide when the box's axis is
+ *  trustworthy evidence. */
+function axisFromBox(f: { box: [number, number, number, number]; chars: string[] }, dir: "h" | "v"): { ux: number; uy: number; lean: boolean; axisLocked: boolean } {
   const w = f.box[2] - f.box[0], h = f.box[3] - f.box[1];
   const m = Math.max(2, f.chars.length);
   const gX = w / m, gY = h / m; // per-char extent each way
   if (gY >= gX * 1.3) {
     // column-ish: clean column unless the box is far wider than one glyph
-    if (w <= gY * 1.8) return { ux: 0, uy: 1 };
+    if (w <= gY * 1.8) return { ux: 0, uy: 1, lean: false, axisLocked: true };
     const g = Math.hypot(w, h) / (m + Math.SQRT2);
     const sinT = Math.min(0.999, Math.max(0.05, (h - g) / (m * g)));
-    return { ux: Math.sqrt(1 - sinT * sinT), uy: sinT }; // lean sign +x (measured)
+    return { ux: Math.sqrt(1 - sinT * sinT), uy: sinT, lean: true, axisLocked: true }; // lean sign +x (measured)
   }
   // row-ish (wider per char than tall). A box ~one glyph tall is a flat row.
   // A TALL box is either a leaning v-labeled strip (diagonal handwriting — the
@@ -259,9 +261,11 @@ function axisFromBox(f: { box: [number, number, number, number]; chars: string[]
   if (h > gX * 2.5 && dir === "v") {
     const g = Math.hypot(w, h) / (m + Math.SQRT2);
     const sinT = Math.min(0.999, Math.max(0.05, (h - g) / (m * g)));
-    return { ux: Math.sqrt(1 - sinT * sinT), uy: sinT };
+    return { ux: Math.sqrt(1 - sinT * sinT), uy: sinT, lean: true, axisLocked: true };
   }
-  return { ux: 1, uy: 0 };
+  // clean/ambiguous ROW: horizontal claim is NOT credible (a rotated strip's
+  // AABB masquerades as a flat row — the bend case) → not direction evidence
+  return { ux: 1, uy: 0, lean: false, axisLocked: false };
 }
 
 // ---------- fusion ----------
@@ -416,51 +420,106 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
         pEnd: [scx + u.ux * half * pitch, scy + u.uy * half * pitch],
       };
     };
-    // bootstrap axis from chain fragment centers, refine once with anchor endpoints.
-    // <2 DISTINCT fragments = no line-local direction evidence → the dominant
-    // fragment's own box carries the axis (lean model); page propagation (below)
-    // overrides with real multi-fragment evidence when the page has it.
+    // bootstrap axis: an AXIS-LOCKED dominant survivor's box model (lean
+    // strip / clean column) beats the spread guess — coherence checks under
+    // a WRONG boot produced both false prunes (sparse diagonals) and missed
+    // stamps (IMG_4921). The final axis below still derives from survivors.
     const cxs = chains[li]!.map((c) => fragByIdx.get(c.frag)!.cx);
     const cys = chains[li]!.map((c) => fragByIdx.get(c.frag)!.cy);
     const rng = (a: number[]) => Math.max(...a) - Math.min(...a);
     const distinct = new Set(chains[li]!.map((c) => c.frag)).size;
     const dominant = chains[li]!.slice().sort((a, b) => fragByIdx.get(b.frag)!.chars.length - fragByIdx.get(a.frag)!.chars.length)[0]!;
     const bootFrag = fragByIdx.get(dominant.frag)!;
-    const boot = distinct >= 2
-      ? (rng(cxs) >= rng(cys) ? { ux: 1, uy: 0 } : { ux: 0, uy: 1 })
-      : axisFromBox(bootFrag, ln.dir);
+    const domBoot = axisFromBox(bootFrag, ln.dir);
+    const bootTrusted = domBoot.axisLocked;
+    const boot = domBoot.axisLocked
+      ? { ux: domBoot.ux, uy: domBoot.uy }
+      : distinct >= 2
+        ? (rng(cxs) >= rng(cys) ? { ux: 1, uy: 0 } : { ux: 0, uy: 1 })
+        : { ux: domBoot.ux, uy: domBoot.uy };
     let anchors = chains[li]!.map((c) => mkAnchor(c, boot)).sort((a, b) => a.oStart - b.oStart);
-    const own = distinct >= 2 ? axisOf(anchors, ln.dir) : { ...axisFromBox(bootFrag, ln.dir), fromLLM: true };
-    const { ux, uy } = axisOverride ?? own;
-    const fromLLM = axisOverride ? false : own.fromLLM;
-    anchors = chains[li]!.map((c) => mkAnchor(c, { ux, uy })).sort((a, b) => a.oStart - b.oStart);
     // SPATIAL COHERENCE PRUNE: consecutive anchors must be CONTIGUOUS along
     // the axis — a textually-matching fragment hundreds of pixels away (the
     // 虎符虎符 stamp anchoring a column's tail from across the page, measured
     // on IMG_4921) stretches the line AND poisons page-evidence. Metric is
     // gap PER CHAR-OFFSET between the anchors: a classical-missed middle
     // (4 pitches over 4 missing chars = 1×) is legit; a 660px jump over ONE
-    // char step is not. Drop the weaker anchor; iterate (each drop re-derives).
+    // char step is not. Drop the weaker candidate; iterate (each drop re-derives).
+    let survivors = [...chains[li]!];
     for (let pass = 0; pass < 4 && anchors.length >= 2; pass++) {
-      let worst = -1, worstExcess = 0;
-      for (let k = 0; k + 1 < anchors.length; k++) {
-        const a = anchors[k]!, b = anchors[k + 1]!;
-        const gap = Math.hypot(b.pStart[0] - a.pEnd[0], b.pStart[1] - a.pEnd[1]);
+      // per-pair diagnostics (boot-geometry gaps; ratios are what matter)
+      const pairs = anchors.slice(0, -1).map((a, i) => {
+        const b = anchors[i + 1]!;
+        const dx = b.pStart[0] - a.pEnd[0], dy = b.pStart[1] - a.pEnd[1];
+        const gap = Math.hypot(dx, dy);
         const dOff = Math.max(1, b.oStart - (a.oEnd - 1));
-        const perChar = gap / dOff;
-        const limit = 3 * Math.max(a.pitch, b.pitch);
-        const excess = perChar / limit;
-        if (perChar > limit && excess > worstExcess) { worstExcess = excess; worst = k; }
+        return { a, b, dx, dy, gap, dOff, perChar: gap / dOff };
+      });
+      // distance coherence is PAIR-RELATIVE: a pair deviating >4x the chain's
+      // median per-char spacing is not a continuation (absolute glyph-size
+      // limits false-positived on sparse text — 甲乙丙 at 155px pitch over
+      // 40px glyphs — and the boot axis can misestimate extents anyway)
+      const medPerChar = [...pairs.map((p) => p.perChar)].sort((x, y) => x - y)[Math.floor(pairs.length / 2)]!;
+      let worst = -1, worstExcess = 0;
+      for (let k = 0; k < pairs.length; k++) {
+        const p = pairs[k]!;
+        let excess = 0;
+        if (pairs.length >= 2) {
+          // PAIR-RELATIVE: an outlier >4× the chain's median per-char spacing
+          // (absolute glyph limits false-positived on sparse text — 甲乙丙 at
+          // 155px pitch over 40px glyphs)
+          if (p.perChar > 4 * medPerChar) excess = p.perChar / (4 * medPerChar);
+        } else if (bootTrusted) {
+          // single pair + TRUSTED boot (axis-locked dominant): absolute
+          // distance is meaningful — a stamp 400+px per char step is not a
+          // continuation even when its own box carries no axis
+          const limit = 3 * Math.max(p.a.pitch, p.b.pitch);
+          if (p.perChar > limit) excess = p.perChar / limit;
+        }
+        // DIRECTION coherence (IMG_4921: cross-COLUMN pairs 确爲+時兵 / 明+望太傅
+        // gave 20°/104° pair axes while the fragments' own boxes say ~73° —
+        // the poison then propagated page-wide as "evidence"). Enforced only
+        // when BOTH boxes are axis-locked (lean strips, clean columns); flat/ambiguous rows
+        // (bend rows, grouped print, single chars) are exempt.
+        const fa = axisFromBox(p.a.frag, ln.dir), fb = axisFromBox(p.b.frag, ln.dir);
+        if (fa.axisLocked && fb.axisLocked && p.gap > 1e-6) {
+          const pairAng = (Math.atan2(p.dy, p.dx) * 180) / Math.PI;
+          const dev = (ang: number) => Math.abs(((ang - pairAng + 540) % 360) - 180);
+          const minDev = Math.min(dev((Math.atan2(fa.uy, fa.ux) * 180) / Math.PI), dev((Math.atan2(fb.uy, fb.ux) * 180) / Math.PI));
+          if (minDev > 30) excess = Math.max(excess, minDev / 30);
+        }
+        if (excess > worstExcess) { worstExcess = excess; worst = k; }
       }
       if (worst < 0) break;
-      const a = anchors[worst]!, b = anchors[worst + 1]!;
+      const { a, b } = pairs[worst]!;
       const drop = (a.oEnd - a.oStart) < (b.oEnd - b.oStart) ? a : b; // fewer covered chars = weaker
-      anchors = anchors.filter((x) => x !== drop);
+      const dropCand = survivors.find((c) => c.frag === drop.frag.idx && spanOf(c).oStart === drop.oStart);
+      survivors = survivors.filter((c) => c !== dropCand);
+      anchors = survivors.map((c) => mkAnchor(c, boot)).sort((x, y) => x.oStart - y.oStart);
     }
     if (!anchors.length) {
       // every anchor pruned as incoherent — the line is honestly unanchored
       return mk(ln.cleanChars.map((c) => ({ char: c, anchored: false })), null, true, []);
     }
+    // FINAL axis from the SURVIVORS. Preference order: an unambiguous LEAN
+    // STRIP's box axis (the dominant survivor) over pair-deltas — pair
+    // positions are computed under the BOOT axis, and for leaning strips the
+    // boot places pStart/pEnd at box-center x, making the pair DIRECTION
+    // garbage (IMG_4921: split-column 明+望太傅 pair → 104°, both boxes say
+    // ~74°). Pair-deltas remain the evidence for flat-box lines (poster rows,
+    // bends) where the box model has no lean to read.
+    const survDistinct = new Set(survivors.map((c) => c.frag)).size;
+    const survDominant = survivors.slice().sort((x, y) => fragByIdx.get(y.frag)!.chars.length - fragByIdx.get(x.frag)!.chars.length)[0]!;
+    const domAxis = axisFromBox(fragByIdx.get(survDominant.frag)!, ln.dir);
+    const own = domAxis.lean
+      ? { ux: domAxis.ux, uy: domAxis.uy, fromLLM: false }
+      : survDistinct >= 2
+        ? axisOf(anchors, ln.dir)
+        : { ux: domAxis.ux, uy: domAxis.uy, fromLLM: true };
+    const { ux, uy } = axisOverride ?? own;
+    const fromLLM = axisOverride ? false : own.fromLLM;
+    if (DBG) console.error(`[fusion] axis line n=${ln.n}: survivors=[${survivors.map((c) => `f${c.frag}:${c.fStart}-${c.fEnd}@C${c.startC}-${c.endC}`).join(" ")}] domLean=${domAxis.lean} own=(${own.ux.toFixed(2)},${own.uy.toFixed(2)}) final=(${ux.toFixed(2)},${uy.toFixed(2)})`);
+    anchors = survivors.map((c) => mkAnchor(c, { ux, uy })).sort((a, b) => a.oStart - b.oStart);
 
     const chars: FusedChar[] = ln.cleanChars.map((ch, oi) => {
       const offset = ln.offsets[oi]!;
@@ -504,15 +563,12 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       return { char: ch, box: [Math.round(px - hp), Math.round(py - hp), Math.round(px + hp), Math.round(py + hp)], anchored: false, extrapolated: extrapolated || undefined };
     });
 
-    // line angle: mean direction across consecutive anchor endpoints
-    let ax = 0, ay = 0, cnt = 0;
-    for (let k = 1; k < anchors.length; k++) {
-      ax += anchors[k]!.pStart[0] - anchors[k - 1]!.pEnd[0];
-      ay += anchors[k]!.pStart[1] - anchors[k - 1]!.pEnd[1];
-      cnt++;
-    }
-    if (cnt === 0) { ax = ux; ay = uy; cnt = 1; }
-    const angle = Math.round((Math.atan2(ay / cnt, ax / cnt) * 180) / Math.PI);
+    // line angle = the FINAL AXIS. (The old anchor-endpoint mean diverged from
+    // the axis whenever a far/borderline second anchor survived the prune —
+    // IMG_4921 raw-cache: a 确爲+stamp pair reported 48° while the axis was
+    // 65°, and the 48° then propagated page-wide as evidence. Bends are
+    // carried by per-char piecewise placement, not by this angle.)
+    const angle = Math.round((Math.atan2(uy, ux) * 180) / Math.PI);
 
     // matchedFragments mirrors the PRUNED anchors (the spatial-coherence
     // prune above may drop chain candidates — 4921: the 虎符虎符 stamp — and

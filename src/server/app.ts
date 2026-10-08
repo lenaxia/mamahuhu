@@ -721,17 +721,30 @@ async function buildPhrase(
         // are a dictionary limitation (period vocabulary), not an overlay
         // quality problem (letter-4920: 72% singles but angles 51-68° = tight
         // cluster = well-placed rotated chips). Scatter = model guessing.
-        // NOTE: no "absent angles" branch — classical-served results are ALL
-        // box-only (angles come from vector/fusion rungs) and a boxes>0.5 &&
-        // angles<3 test demoted every classical poster to list layout
-        // (owner-measured). The fragment-soup case it guarded for is now
-        // rejected upstream by the ladder's grouping-coherence gate.
+        // NOTE: no "absent angles" branch — classical-box-only results were
+        // demoted wholesale by one (owner-measured); that case is now handled
+        // by the ladder's routing.
+        // OUTLIER-ROBUST: judge coherence against the MEDIAN angle per LINE —
+        // a page with coherent 65-74° columns plus one 12° oddball keeps its
+        // columns and drops only the oddball (the old stdev test nuked the
+        // whole overlay — measured on IMG_4921 post-fusion-routing).
         const angles = allWords.filter((w) => w.angle !== undefined).map((w) => w.angle!);
         if (angles.length >= 6) {
-          const am = angles.reduce((s: number, a: number) => s + a, 0) / angles.length;
-          const asd = Math.sqrt(angles.reduce((s: number, a: number) => s + (a - am) ** 2, 0) / angles.length);
-          if (asd > 25) {
-            // wildly scattered angles → the model is guessing direction
+          const lineAngles = lines.map((l: { words: z.infer<typeof OcrWordSchema>[] }) => ({
+            words: l.words,
+            angle: l.words.find((w) => w.angle !== undefined)?.angle,
+          })).filter((l) => l.angle !== undefined) as { words: z.infer<typeof OcrWordSchema>[]; angle: number }[];
+          const sorted = lineAngles.map((l) => l.angle).sort((a, b) => a - b);
+          const med = sorted[Math.floor(sorted.length / 2)]!;
+          const deviant = lineAngles.filter((l) => Math.abs(l.angle - med) > 25);
+          const coherent = lineAngles.filter((l) => Math.abs(l.angle - med) <= 25);
+          const deviantWords = deviant.reduce((s, l) => s + l.words.length, 0);
+          const coherentBoxed = coherent.reduce((s, l) => s + l.words.filter((w) => w.box !== undefined).length, 0);
+          if (deviant.length) {
+            for (const l of deviant) for (const w of l.words) w.box = undefined;
+          }
+          if (coherentBoxed === 0 || deviantWords > allWords.length / 2) {
+            // no coherent majority either — the old full demotion
             for (const l of lines) for (const w of l.words) w.box = undefined;
             positioned = false;
           }

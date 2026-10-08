@@ -182,15 +182,51 @@ export class LadderOcrService implements OcrService {
   }
 
   async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
+    let items: RapidItem[] = [];
+    let w = 0, h = 0;
+    let eligible = false; // classical sees coherent LINE structure (print, letters, grids)
     try {
       const bytes = new Uint8Array(await image.arrayBuffer());
-      const { items, w, h } = await this.rapid.extract(bytes);
-      if (classicalSufficient(items)) {
+      ({ items, w, h } = await this.rapid.extract(bytes));
+      eligible = classicalSufficient(items);
+      const b64 = Buffer.from(bytes).toString("base64");
+
+      // FUSION ROUTING (OCR_FUSION=1): classical boxes NEVER serve directly —
+      // an AABB cannot represent rotated text (the owner's diagonal letter
+      // served overlapping raw boxes through the old "classical sufficient"
+      // branch). classicalSufficient now means fusion-ELIGIBLE: line structure
+      // exists to align the structure-LLM text onto. Fragment soup / clouds /
+      // empty → vector rung (measured better there). Fusion serves only when
+      // anchoring is substantial (≥20% of chars, ≥6 chars).
+      if (process.env.OCR_FUSION === "1" && this.chatCfg) {
+        if (items.length > 0 && eligible) {
+          try {
+            const { fuseStructure, parseStructureLines, fusedToOcrLines } = await import("./ocr-fusion");
+            const raw = await this.chat(STRUCTURE_SYSTEM, b64, 4000);
+            const result = fuseStructure(items, parseStructureLines(raw), { w, h });
+            const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
+            const anchoredChars = result.lines.reduce((s, l) => s + l.chars.filter((c) => c.anchored).length, 0);
+            if (totalChars > 0 && anchoredChars >= 6 && anchoredChars / totalChars >= 0.2) {
+              const fused = fusedToOcrLines(result);
+              if (fused.some((l) => l.charBoxes)) {
+                this.lastServedBy = "fusion";
+                return { ok: true, value: { lines: fused } };
+              }
+            }
+          } catch {
+            /* fusion is best-effort — vector rung stands behind it */
+          }
+        }
+        this.lastServedBy = "llm";
+        return this.llm.extract(image);
+      }
+
+      // LEGACY PATH (OCR_FUSION unset — the rollback kill-switch): classical
+      // serves its own boxes, CENSUS verify closes coverage gaps
+      if (eligible) {
         this.lastServedBy = "classical";
         const lines = classicalLines(items);
         if (lines.length) {
-          // CENSUS verify: close the coverage hole — LLM lists regions, code
-          // compares, unexplained regions get crop-recognized and merged
           if (this.chatCfg) {
             try {
               const gaps = await this.censusGaps(bytes, items, w, h);
@@ -223,31 +259,6 @@ export class LadderOcrService implements OcrService {
             }
           }
           return { ok: true, value: { lines } };
-        }
-      }
-      // FUSION rung (OCR_FUSION=1): classical boxes + LLM text/structure,
-      // deterministic alignment (src/server/ocr-fusion.ts). Classical must have
-      // produced SOMETHING to anchor against; curves with 0 items go straight
-      // to the vector rung. Serves only when anchoring is substantial (≥20% of
-      // chars, ≥6 chars) — a 1-line fluke must not displace the vector rung,
-      // which positions every line (with its known 2x error modes).
-      if (this.chatCfg && process.env.OCR_FUSION === "1" && items.length > 0) {
-        try {
-          const { fuseStructure, parseStructureLines, fusedToOcrLines } = await import("./ocr-fusion");
-          const raw = await this.chat(STRUCTURE_SYSTEM, Buffer.from(bytes).toString("base64"), 4000);
-          const structure = parseStructureLines(raw);
-          const result = fuseStructure(items, structure, { w, h });
-          const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
-          const anchoredChars = result.lines.reduce((s, l) => s + l.chars.filter((c) => c.anchored).length, 0);
-          if (totalChars > 0 && anchoredChars >= 6 && anchoredChars / totalChars >= 0.2) {
-            const fused = fusedToOcrLines(result);
-            if (fused.some((l) => l.charBoxes)) {
-              this.lastServedBy = "fusion";
-              return { ok: true, value: { lines: fused } };
-            }
-          }
-        } catch {
-          /* fusion is best-effort — vector rung stands behind it */
         }
       }
     } catch {
