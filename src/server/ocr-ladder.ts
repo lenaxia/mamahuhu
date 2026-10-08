@@ -252,7 +252,8 @@ export class LadderOcrService implements OcrService {
           }
         }
         this.lastServedBy = "llm";
-        return this.llm.extract(image);
+        const vec = await this.llm.extract(image);
+        return vec.ok ? { ...vec, value: { ...vec.value, servedBy: "llm" } } : vec;
       }
 
       // LEGACY PATH (OCR_FUSION unset — the rollback kill-switch): classical
@@ -299,7 +300,8 @@ export class LadderOcrService implements OcrService {
       /* classical unavailable/erroring → fall through to the LLM rung */
     }
     this.lastServedBy = "llm";
-    return this.llm.extract(image);
+    const vec = await this.llm.extract(image);
+    return vec.ok ? { ...vec, value: { ...vec.value, servedBy: "llm" } } : vec;
   }
 }
 
