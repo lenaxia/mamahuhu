@@ -1,365 +1,132 @@
-// Structure-fusion matcher unit tests — synthetic cases for every edge in the
-// design matrix. All geometry asserts are in ORIGINAL pixel space.
+// STRUCTURE FUSION v2 — fragment-inventory architecture.
+// Classical fragments ARE the line inventory (deterministic — duplicates,
+// merges and missing columns cannot exist by construction); the structure
+// LLM improves text and supplies columns classical can't read. All geometry
+// asserts in ORIGINAL pixel space.
 import { describe, expect, it } from "vitest";
-import { fuseStructure, parseStructureTokens, parseStructureLines, fusedToOcrLines, type ClassicalItem, type StructureLine } from "../../src/server/ocr-fusion";
+import { fuseStructure, parseStructureTokens, parseStructureLines, localAlign, type ClassicalItem, type StructureLine } from "../../src/server/ocr-fusion";
 
 const item = (text: string, box: [number, number, number, number]): ClassicalItem => ({ text, box, score: 0.9 });
 const line = (n: number, text: string, dir: "h" | "v" = "h"): StructureLine => ({ n, text, dir });
-const centers = (r: { lines: { chars: { char: string; box?: number[] }[] }[] }, n: number) =>
+const centers = (r: { lines: { chars: { box?: number[] }[] }[] }, n: number) =>
   r.lines[n - 1]!.chars.map((c) => (c.box ? [(c.box[0]! + c.box[2]!) / 2, (c.box[1]! + c.box[3]!) / 2] : null));
 
-describe("parseStructureTokens", () => {
-  it("splits chars and gap markers (fractional widths allowed)", () => {
-    const t = parseStructureTokens("我愛你⟪2⟫你是我的⟪1.5⟫END");
-    expect(t.filter((x) => x.char).map((x) => x.char).join("")).toBe("我愛你你是我的END");
+describe("parseStructureTokens / parseStructureLines", () => {
+  it("splits chars and gap markers; tolerates fences, drops gap-only lines", () => {
+    const t = parseStructureTokens("我愛你⟪2⟫你是我的⟪1.5⟫");
+    expect(t.filter((x) => x.char).map((x) => x.char).join("")).toBe("我愛你你是我的");
     expect(t.filter((x) => x.gap).map((x) => x.gap)).toEqual([2, 1.5]);
-  });
-});
-
-describe("parseStructureLines (raw LLM response)", () => {
-  it("accepts fenced JSON, bare arrays, drops gap-only/empty lines", () => {
     const fenced = '```json\n{"lines":[{"n":1,"text":"親近自然","dir":"h"},{"n":2,"text":"⟪3⟫","dir":"v"}]}\n```';
     expect(parseStructureLines(fenced)).toEqual([{ n: 1, text: "親近自然", dir: "h" }]);
-    const bare = 'noise [{"text":"甲乙","dir":"v"}] trailing';
-    expect(parseStructureLines(bare)).toEqual([{ n: 1, text: "甲乙", dir: "v" }]);
-    expect(parseStructureLines("no json at all")).toEqual([]);
-    expect(parseStructureLines('{"lines":[{"text":"甲","dir":"bogus"}]}')).toEqual([{ n: 1, text: "甲", dir: "h" }]);
+    expect(parseStructureLines("no json")).toEqual([]);
   });
 });
 
-describe("fusedToOcrLines (app contract conversion)", () => {
-  it("anchored line → charBoxes + union box + dir from GEOMETRY (steep axis wins over LLM dir)", () => {
+describe("localAlign", () => {
+  it("finds the clean chunk of a CTC-corrupted fragment; variant-tolerant", () => {
+    const w = localAlign([..."明望太傳大人经依抹此"], [..."明望太傅大人能依据此"]);
+    expect(w).not.toBeNull();
+    expect(w?.matched ?? 0).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe("fragment inventory (the anti-duplicate invariant)", () => {
+  it("one line per fragment — duplicate LLM readings cannot multiply lines", () => {
+    // three variant readings of the same column + one other column
     const r = fuseStructure(
-      [item("親近", [0, 0, 60, 100]), item("自然", [30, 160, 90, 260])],
-      [{ n: 1, text: "親近自然", dir: "h" }], // LLM says h; anchors say steep
+      [item("确為真品現此调", [385, 657, 558, 1052]), item("者手中卑職深知此事干", [308, 677, 528, 1238])],
+      [line(1, "確為真品現此調兵虎符", "v"), line(2, "确为真品现此调兵虎符", "v"), line(3, "澄证据确为真品现此调", "v"), line(4, "者手中卑職深知此事干", "v")],
     );
-    const out = fusedToOcrLines(r);
-    expect(out[0]!.charBoxes).toHaveLength(4);
-    expect(out[0]!.angle).toBeGreaterThanOrEqual(60); // steep diagonal
-    expect(out[0]!.angle).toBeLessThanOrEqual(90);
-    expect(out[0]!.dir).toBe("v"); // geometry beats the LLM label
-    const [x1, y1, x2, y2] = out[0]!.box!;
-    expect(x1).toBeGreaterThanOrEqual(-40); // union hugs the anchor span
-    expect(y1).toBeGreaterThanOrEqual(-40);
-    expect(x2).toBeLessThanOrEqual(130);
-    expect(y2).toBeLessThanOrEqual(300);
-    // axis-aligned case: dir stays h, boxes inside the fragment
-    const r2 = fuseStructure([item("親近自然", [0, 0, 400, 100])], [{ n: 1, text: "親近自然", dir: "h" }]);
-    const out2 = fusedToOcrLines(r2);
-    expect(out2[0]!.dir).toBe("h");
-    expect(out2[0]!.box![0]).toBeGreaterThanOrEqual(0);
-    expect(out2[0]!.box![2]).toBeLessThanOrEqual(400);
+    expect(r.lines).toHaveLength(2); // the inventory size, not the LLM's line count
+    expect(r.lines.every((l) => l.chars.every((c) => c.anchored && c.box))).toBe(true);
   });
 
-  it("unanchored line → text-only (no charBoxes/box/angle)", () => {
-    const r = fuseStructure([], [{ n: 1, text: "日夜奔波", dir: "v" }]);
-    const out = fusedToOcrLines(r);
-    expect(out[0]).toEqual({ text: "日夜奔波", dir: "v" });
-  });
-});
-
-describe("anchoring basics", () => {
-  it("a multi-char fragment anchors ALL its chars, uniformly inside the box", () => {
-    const r = fuseStructure([item("親近自然", [0, 0, 400, 100])], [line(1, "親近自然")]);
-    const l = r.lines[0]!;
-    expect(l.chars.every((c) => c.anchored)).toBe(true);
-    const cs = centers(r, 1) as number[][];
-    expect(cs[0]![0]).toBeCloseTo(50, -1); // 4 chars over 400px → pitch 100, first center 50
-    expect(cs[3]![0]).toBeCloseTo(350, -1);
-    for (const c of l.chars) { expect(c.box![0]).toBeGreaterThanOrEqual(0); expect(c.box![2]).toBeLessThanOrEqual(400); }
-    expect(r.unmatchedFragments).toHaveLength(0);
+  it("LLM text replaces CTC text when a reading covers ≥90% of the fragment", () => {
+    const r = fuseStructure([item("亲近自然", [0, 0, 400, 100])], [line(1, "親近自然")]);
+    expect(r.lines[0]!.text).toBe("親近自然");
+    expect(r.lines[0]!.improved).toBe(true);
+    // no covering reading → classical text stands
+    const r2 = fuseStructure([item("亲近自然", [0, 0, 400, 100])], [line(1, "完全不同的文字")]);
+    expect(r2.lines[0]!.text).toBe("亲近自然");
+    expect(r2.lines[0]!.improved).toBeUndefined();
   });
 
-  it("classical text simplified + LLM traditional still matches (variant normalization)", () => {
+  it("simplified classical vs traditional LLM still matches (variant normalization)", () => {
     const r = fuseStructure([item("确为真品", [0, 0, 400, 100])], [line(1, "確為真品")]);
-    expect(r.lines[0]!.chars.filter((c) => c.anchored)).toHaveLength(4);
+    expect(r.lines[0]!.text).toBe("確為真品");
   });
 
-  it("punctuation the classical read elided is bridged (windowed approximate match)", () => {
-    const r = fuseStructure([item("倡导环保财商培养", [0, 0, 720, 90])], [line(1, "倡导环保·财商培养")]);
-    const l = r.lines[0]!;
-    expect(l.chars.filter((c) => c.anchored)).toHaveLength(9); // the · sits inside the anchor span
-    expect(l.text).toBe("倡导环保·财商培养");
-  });
-
-  it("hallucinated classical text (grid rows) anchors NOTHING — honesty over guessing", () => {
-    const r = fuseStructure([item("合個英與", [136, 67, 1792, 444])], [line(1, "則登續聞承臧", "v"), line(2, "崩遠鴻喬夔", "v")]);
-    expect(r.lines.every((l) => l.angle === null && l.chars.every((c) => !c.anchored && !c.box))).toBe(true);
-    expect(r.unmatchedFragments).toHaveLength(1);
-  });
-});
-
-describe("repeats — text never deduplicates (the 11× lesson)", () => {
-  it("identical single-char fragments anchor EVERY instance in spatial order", () => {
+  it("reading order: rows T→B L→R; vertical columns R→L; junk fragments dropped", () => {
     const r = fuseStructure(
-      [item("虎", [60, 0, 140, 80]), item("虎", [160, 0, 240, 80]), item("虎", [260, 0, 340, 80]), item("虎", [360, 0, 440, 80])],
-      [line(1, "虎虎虎虎")],
+      [item("M", [1084, 75, 1123, 113]), item("左列文字", [100, 100, 150, 300]), item("右列文字", [300, 100, 350, 300]), item("+", [1063, 1541, 1092, 1572])],
+      [],
     );
-    const l = r.lines[0]!;
-    expect(l.chars.filter((c) => c.anchored)).toHaveLength(4);
-    const xs = (centers(r, 1) as number[][]).map((c) => c[0]);
-    expect(xs).toEqual([100, 200, 300, 400]); // leftmost box ↔ first 虎
+    expect(r.lines.map((l) => l.text)).toEqual(["右列文字", "左列文字"]); // v columns R→L; M/+ dropped
   });
 
-  it("an 11× repeated fragment anchors 11 distinct positions, not one", () => {
-    const items = Array.from({ length: 11 }, (_, i) => item("年職", [i * 200, 0, i * 200 + 180, 90]));
-    const r = fuseStructure(items, [line(1, "年職".repeat(11))]);
-    expect(r.lines[0]!.chars.filter((c) => c.anchored)).toHaveLength(22);
-  });
-
-  it("cross-line conflict: a contested fragment goes to the spatially coherent line", () => {
-    // line 1 top row (y≈100): 虎符在此 ; line 2 bottom row (y≈300): 密呈虎符
-    // 虎符 fragment sits in the BOTTOM row — sequential first-claim gives it to
-    // line 1; the residual round must move it to line 2
-    const r = fuseStructure(
-      [item("虎符", [300, 290, 400, 340]), item("在", [430, 90, 480, 120]), item("此", [510, 90, 560, 120]),
-       item("密", [60, 290, 110, 340]), item("呈", [160, 290, 210, 340])],
-      [line(1, "虎符在此"), line(2, "密呈虎符")],
-    );
-    expect(r.lines[0]!.chars.filter((c) => c.anchored)).toHaveLength(2); // 在此
-    expect(r.lines[1]!.chars.every((c) => c.anchored)).toBe(true); // 密呈虎符 — all four
-    const y1 = (centers(r, 2) as number[][]).map((c) => c[1]!);
-    expect(Math.max(...y1) - Math.min(...y1)).toBeLessThan(60); // all on the bottom row
-  });
-});
-
-describe("gaps (relative char-width units)", () => {
-  it("a gap between anchors is recorded and consumes offset space, both sides still anchor", () => {
-    const r = fuseStructure(
-      [item("我愛你", [0, 0, 120, 40]), item("你是我的", [200, 0, 320, 40])],
-      [line(1, "我愛你⟪2⟫你是我的")],
-    );
-    const l = r.lines[0]!;
-    expect(l.text).toBe("我愛你你是我的");
-    expect(l.gaps).toEqual([{ atChar: 3, widths: 2 }]);
-    expect(l.chars.filter((c) => c.anchored)).toHaveLength(7); // all 7 — gap carries no chars
-  });
-
-  it("a fragment whose text elides the gap still chains (letters with seals/stamps)", () => {
-    const r = fuseStructure([item("我愛你你是我的", [0, 0, 320, 40])], [line(1, "我愛你⟪2⟫你是我的")]);
-    const l = r.lines[0]!;
-    expect(l.matchedFragments).toHaveLength(1);
-    expect(l.chars.every((c) => c.anchored)).toBe(true);
-  });
-
-  it("leading/trailing gap markers are tolerated (boundary gaps)", () => {
-    const r = fuseStructure([item("你是我的", [0, 0, 160, 40])], [line(1, "⟪3⟫你是我的⟪1⟫")]);
-    expect(r.lines[0]!.chars.filter((c) => c.anchored)).toHaveLength(4);
-  });
-});
-
-describe("interpolation & extrapolation", () => {
-  it("classical missing the middle: chars between anchors interpolate on the segment", () => {
-    // 甲乙丙丁戊己: anchors on 甲 and 己 only; middle 4 interpolate
-    const r = fuseStructure([item("甲", [0, 0, 40, 40]), item("己", [500, 0, 540, 40])], [line(1, "甲乙丙丁戊己")]);
-    const l = r.lines[0]!;
-    expect(l.chars.filter((c) => c.anchored)).toHaveLength(2);
-    const xs = (centers(r, 1) as number[][]).map((c) => c[0]);
-    for (let i = 1; i <= 4; i++) expect(xs[i]!).toBeCloseTo(20 + i * 100, -1); // 20→520 over 5 pitches
-  });
-
-  it("single anchor: both sides extrapolate at the local pitch, flagged", () => {
-    const r = fuseStructure([item("合個", [200, 0, 400, 100])], [line(1, "前合個後")]);
-    const l = r.lines[0]!;
-    expect(l.chars[1]!.anchored && l.chars[2]!.anchored).toBe(true);
-    expect(l.chars[0]!.extrapolated && l.chars[3]!.extrapolated).toBe(true);
-    expect(l.angle).not.toBeNull();
-    expect(l.dirFromLLM).toBe(true); // single anchor — no spatial direction evidence
-  });
-
-  it("no anchors at all: line is honest-unanchored, no boxes, no crash", () => {
-    const r = fuseStructure([], [line(1, "床前明月光")]);
-    const l = r.lines[0]!;
-    expect(l.angle).toBeNull();
-    expect(l.chars.every((c) => !c.box)).toBe(true);
-    expect(l.text).toBe("床前明月光");
-  });
-
-  it("spatially out-of-order fragment is DROPPED by the chain (order coherence)", () => {
-    // 乙 sits after 丙 in space but before it in text — cannot chain
-    const r = fuseStructure(
-      [item("甲", [0, 0, 40, 40]), item("丙", [100, 0, 140, 40]), item("乙", [300, 0, 340, 40])],
-      [line(1, "甲乙丙")],
-    );
-    expect(r.lines[0]!.chars.filter((c) => c.anchored)).toHaveLength(2);
-    expect(r.unmatchedFragments.map((f) => f.text)).toEqual(["乙"]);
-  });
-});
-
-describe("direction & curves", () => {
-  it("vertical line: placement runs along y (dir v)", () => {
-    const r = fuseStructure([item("甲", [0, 0, 40, 40]), item("乙", [0, 100, 40, 140]), item("丙", [0, 200, 40, 240])], [line(1, "甲乙丙", "v")]);
-    const ys = (centers(r, 1) as number[][]).map((c) => c[1]);
-    expect(ys).toEqual([20, 120, 220]);
-  });
-
-  it("45° diagonal: axis comes from anchor geometry, chars collinear on the diagonal", () => {
-    const r = fuseStructure(
-      [item("甲", [0, 0, 40, 40]), item("乙", [110, 110, 150, 150]), item("丙", [220, 220, 260, 260])],
-      [line(1, "甲乙丙丁戊")],
-    );
+  it("fragment chars placed evenly along the box axis, in-bounds", () => {
+    const r = fuseStructure([item("親近自然", [0, 0, 400, 100])], []);
     const cs = centers(r, 1) as number[][];
-    expect(cs[0]).toEqual([20, 20]);
-    expect(cs[2]).toEqual([240, 240]);
-    // interpolated 丁,戊 between 乙 and 丙 stay on the diagonal
-    for (const c of cs.slice(1)) expect(Math.abs(c[0]! - c[1]!)).toBeLessThan(12);
+    expect(Math.abs((cs[0] ?? [0])[0]! - 50)).toBeLessThan(2);
+    expect(Math.abs((cs[3] ?? [0])[0]! - 350)).toBeLessThan(2);
+    for (const c of r.lines[0]!.chars) { expect(c.box![0]).toBeGreaterThanOrEqual(0); expect(c.box![2]).toBeLessThanOrEqual(400); }
   });
 
-  it("bending line: chars between anchors follow PIECEWISE segments, not one straight axis", () => {
-    // A(50,25) → B(150,125): 45° down; B → C(350,125): flat. Not collinear —
-    // X (between A,B) must sit on the descending segment, Y (between B,C) flat.
-    const r = fuseStructure(
-      [item("甲乙", [0, 0, 100, 50]), item("丙丁", [100, 100, 200, 150]), item("戊己", [300, 100, 400, 150])],
-      [line(1, "甲乙X丙丁Y戊己")],
-    );
-    const cs = centers(r, 1) as number[][];
-    const X = cs[2]!, Y = cs[5]!;
-    expect(Math.abs(X[1]! - 75)).toBeLessThan(9); // on the A→B segment
-    expect(Math.abs(Y[1]! - 125)).toBeLessThan(9); // on the flat B→C segment
-    expect(Math.abs(X[0]! - 100)).toBeLessThan(15); // midpoint of the descending segment
-    expect(Math.abs(Y[0]! - 250)).toBeLessThan(15);
-    expect(r.lines[0]!.angle).not.toBeNull();
+  it("leaning diagonal columns place chars along the lean (not straight down)", () => {
+    // 273×497 box for 9 chars — the axisFromBox lean model ≈65°
+    const r = fuseStructure([item("一二三四五六七八九", [693, 561, 964, 1058])], []);
+    const l = r.lines[0]!;
+    expect(l.angle).toBeGreaterThan(50);
+    expect(l.angle).toBeLessThan(85);
+    const xs = l.chars.map((c) => (c.box![0] + c.box![2]) / 2);
+    expect(xs[8]! - xs[0]!).toBeGreaterThan(100); // chars track the lean across the box
   });
 
-  it("LLM dir is IGNORED when anchors contradict it (curve-s: line 2 labeled v, actually h)", () => {
-    const r = fuseStructure([item("低頭", [100, 0, 200, 60]), item("思故", [250, 0, 350, 60]), item("鄉", [400, 0, 450, 60])], [line(1, "低頭思故鄉", "v")]);
-    const cs = centers(r, 1) as number[][];
-    expect(cs.every((c) => Math.abs(c[1]! - 30) < 5)).toBe(true); // horizontal placement
-    expect(r.lines[0]!.dirFromLLM).toBe(false);
+  it("genuine repeats survive: each occurrence is its own fragment", () => {
+    const items = Array.from({ length: 11 }, (_, i) => item("年職", [i * 200, 0, i * 200 + 180, 300]));
+    const r = fuseStructure(items, [line(1, "年職".repeat(11), "v")]);
+    expect(r.lines).toHaveLength(11);
+    expect(r.lines.every((l) => l.chars.every((c) => c.anchored))).toBe(true);
   });
 });
 
-describe("layout inference (classical missing lines entirely)", () => {
-  it("unanchored lines slot between anchored neighbors by line order, on the page axis", () => {
-    // vertical letter, columns read right-to-left: n=1 at x≈800, n=3 at x≈400
+describe("LLM-only columns (classical missed them)", () => {
+  it("placed into a free lattice slot; duplicate readings dropped, not duplicated", () => {
+    // two real columns (fragments) 300px apart + three variant readings of a
+    // missing middle column → ONE inferred line, two dropped
     const r = fuseStructure(
       [item("甲乙", [760, 100, 840, 300]), item("戊己", [360, 100, 440, 300])],
-      [line(1, "甲乙", "v"), line(2, "丙丁", "v"), line(3, "戊己", "v")],
+      [line(1, "甲乙", "v"), line(2, "子丑寅卯", "v"), line(3, "子丑寅卯辰", "v"), line(4, "寅卯子丑", "v"), line(5, "戊己", "v")],
     );
-    const l2 = r.lines[1]!;
-    expect(l2.inferred).toBe(true);
-    expect(l2.chars.every((c) => !c.anchored && c.box)).toBe(true); // positioned but honestly unanchored
-    const xs = l2.chars.map((c) => (c.box![0] + c.box![2]) / 2);
-    expect(Math.abs(xs[0]! - 600)).toBeLessThan(40); // between the two columns
-    const ys = l2.chars.map((c) => (c.box![1] + c.box![3]) / 2);
-    expect(ys[1]!).toBeGreaterThan(ys[0]!); // runs top→bottom like its neighbors
+    const inferred = r.lines.filter((l) => l.inferred);
+    expect(inferred.length).toBe(1); // one column between the fragments
+    expect(r.droppedLines.length).toBe(2); // the other variants
+    expect(r.lines).toHaveLength(3);
+    const x = (inferred[0]!.chars[0]!.box![0]! + inferred[0]!.chars[0]!.box![2]!) / 2;
+    expect(x).toBeGreaterThan(460);
+    expect(x).toBeLessThan(740); // between the two fragment columns
   });
 
-  it("unanchored line beyond the last anchor extrapolates at the column gap", () => {
+  it("more LLM-only lines than free slots: extras drop (bounded by the lattice)", () => {
     const r = fuseStructure(
-      [item("甲乙", [760, 100, 840, 300]), item("戊己", [360, 100, 440, 300])],
-      [line(1, "甲乙", "v"), line(3, "戊己", "v"), line(4, "庚辛", "v")],
+      [item("甲乙", [760, 100, 840, 300])],
+      [line(1, "甲乙", "v"), line(2, "子丑", "v"), line(3, "寅卯", "v"), line(4, "辰巳", "v"), line(5, "午未", "v")],
     );
-    const l4 = r.lines[2]!;
-    expect(l4.inferred).toBe(true);
-    const x = (l4.chars[0]!.box![0]! + l4.chars[0]!.box![2]!) / 2;
-    expect(x).toBeLessThan(400); // left of the last column (reading order r→l)
+    const inferred = r.lines.filter((l) => l.inferred);
+    expect(inferred.length).toBeLessThanOrEqual(2); // left edge + right edge only
+    expect(r.droppedLines.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("spatial-coherence prune: a distant stamp fragment matching the line's tail is dropped", () => {
-    // IMG_4921 measured: 确爲真品現此调 column + the 虎符虎符 stamp 660px away
-    // textually matching the line's last chars — must NOT stretch the line
-    const r = fuseStructure(
-      [item("确為真品現此调", [385, 657, 558, 1052]), item("虎符", [1129, 1482, 1299, 1660])],
-      [line(1, "確為真品現此調兵虎符", "v")],
-    );
-    const l = r.lines[0]!;
-    expect(l.matchedFragments).toEqual([0]); // stamp not claimed
-    expect(r.unmatchedFragments.map((f) => f.text)).toEqual(["虎符"]);
-    const boxes = l.chars.filter((c) => c.anchored && c.box).map((c) => c.box!);
-    const maxX = Math.max(...boxes.map((b) => b[2]));
-    expect(maxX).toBeLessThan(640); // line stays in its column, not stretched to the stamp
-    // but a classical-MISSED middle (few pitches over the same char count) survives
-    const r2 = fuseStructure([item("甲乙", [0, 0, 100, 100]), item("己", [0, 500, 100, 600])], [line(1, "甲乙丙丁戊己")]);
-    expect(r2.lines[0]!.matchedFragments).toEqual([0, 1]); // 4-pitch gap over 4 chars = sane
-  });
-
-  it("inference feasibility: lines that would overlap an anchored column stay loose", () => {
-    // three unanchored lines between two anchored columns only ~96px apart
-    // (24px spacing vs ~100px pitch — the IMG_4921 stack) → loose, not stacked
-    const r = fuseStructure(
-      [item("甲乙", [760, 100, 840, 300]), item("戊己", [664, 100, 744, 300])],
-      [line(1, "甲乙", "v"), line(2, "子丑", "v"), line(3, "寅卯", "v"), line(4, "辰巳", "v"), line(5, "戊己", "v")],
-    );
-    const l2 = r.lines[1]!, l3 = r.lines[2]!, l4 = r.lines[3]!;
-    expect(l2.inferred).toBeUndefined(); // refused — would overlap
-    expect(l2.chars.every((c) => !c.box)).toBe(true);
-    expect(l3.chars.every((c) => !c.box)).toBe(true);
-    expect(l4.chars.every((c) => !c.box)).toBe(true);
-  });
-
-  it("no anchored neighbors at all → stays loose (no inference from nothing)", () => {
+  it("no fragments at all → no inference (vector rung's job)", () => {
     const r = fuseStructure([], [line(1, "日夜奔波", "v")]);
-    expect(r.lines[0]!.inferred).toBeUndefined();
-    expect(r.lines[0]!.chars.every((c) => !c.box)).toBe(true);
+    expect(r.lines).toHaveLength(0);
   });
 });
 
-describe("robustness (pathological inputs)", () => {
-  it("empty items, empty lines, gap-only lines: no crash, honest output", () => {
-    const r = fuseStructure([], []);
-    expect(r.lines).toEqual([]);
-    const r2 = fuseStructure([item("親近自然", [0, 0, 400, 100])], []);
-    expect(r2.unmatchedFragments).toHaveLength(1);
-    const r3 = fuseStructure([item("親近自然", [0, 0, 400, 100])], [line(1, "⟪3⟫")]);
-    expect(r3.lines[0]!.text).toBe("");
-    expect(r3.unmatchedFragments).toHaveLength(1);
-  });
-
-  it("zero-area / whitespace-only fragments are ignored, not fatal", () => {
-    const r = fuseStructure(
-      [item("", [0, 0, 0, 0]), item("   ", [10, 10, 20, 20]), item("親近自然", [0, 100, 400, 150])],
-      [line(1, "親近自然")],
-    );
-    expect(r.lines[0]!.chars.every((c) => c.anchored)).toBe(true);
-    expect(r.unmatchedFragments).toHaveLength(0); // empty/whitespace fragments vanish entirely, not reported as misses
-  });
-
-  it("everything-identical: 100 repeats × 10 lines terminates and never collapses", () => {
-    const items = Array.from({ length: 100 }, (_, i) => item("虎符", [(i % 10) * 300, Math.floor(i / 10) * 300, (i % 10) * 300 + 180, Math.floor(i / 10) * 300 + 180]));
-    const lines = Array.from({ length: 10 }, (_, i) => line(i + 1, "虎符虎符虎符"));
-    const t0 = Date.now();
-    const r = fuseStructure(items, lines);
-    expect(Date.now() - t0).toBeLessThan(5000);
-    const anchoredPerLine = r.lines.map((l) => l.chars.filter((c) => c.anchored).length);
-    expect(Math.max(...anchoredPerLine)).toBeGreaterThanOrEqual(3); // every line got real anchors
-    expect(r.lines.filter((l) => l.chars.every((c) => !c.anchored)).length).toBeLessThan(lines.length);
-  });
-});
-
-describe("variance tolerance (classical emits both granularities)", () => {
-  it("overlapping double-reads: long fragment + singles of the same region coexist", () => {
-    // long fragment covers the line; a stray single char re-read of char 2 is a
-    // separate fragment whose window would overlap — it must NOT steal or break
-    const r = fuseStructure(
-      [item("密呈太傅", [0, 0, 400, 100]), item("呈", [95, 5, 140, 45])],
-      [line(1, "密呈太傅")],
-    );
-    const l = r.lines[0]!;
-    expect(l.chars.every((c) => c.anchored)).toBe(true);
-    const xs = (centers(r, 1) as number[][]).map((c) => c[0]);
-    expect(Math.abs(xs[1]! - 150)).toBeLessThan(20); // 呈 from the LONG fragment, correctly placed
-  });
-
-  it("a fragment SPANNING two LLM line slices anchors both (head→line 1, tail→line 2)", () => {
-    // the ≤20-char prompt cap splits long columns; classical reads them whole
-    const r = fuseStructure([item("明望太傅大人能依", [0, 0, 800, 100])], [line(1, "明望太傅"), line(2, "大人能依")]);
-    const l1 = r.lines[0]!, l2 = r.lines[1]!;
-    expect(l1.chars.every((c) => c.anchored)).toBe(true);
-    expect(l2.chars.every((c) => c.anchored)).toBe(true);
-    expect(l1.matchedFragments).toEqual(l2.matchedFragments); // same fragment, disjoint ranges
-    const x1 = (centers(r, 1) as number[][]).map((c) => c[0]);
-    const x2 = (centers(r, 2) as number[][]).map((c) => c[0]);
-    const nums = (a: unknown[]) => a.filter((n): n is number => typeof n === "number");
-    expect(Math.max(...nums(x1))).toBeLessThan(Math.min(...nums(x2))); // head left, tail right
-    expect(Math.abs(x1[0]! - 50)).toBeLessThan(30); // 8 chars over 800px → pitch 100, first center 50
-    expect(Math.abs(x2[3]! - 750)).toBeLessThan(30);
-  });
-
-  it("CTC-corrupted fragment still anchors via local alignment (clean head chunk)", () => {
-    // classical 傳/经/抹 wrong, LLM correct — the clean prefix matches as a local window
-    const r = fuseStructure([item("明望太傳大人经依抹此重要", [0, 0, 1200, 100])], [line(1, "明望太傅大人能依")]);
-    const l = r.lines[0]!;
-    expect(l.chars.filter((c) => c.anchored).length).toBeGreaterThanOrEqual(5);
+describe("hallucination safety", () => {
+  it("fragment text is never replaced by unrelated LLM text (coverage ≥90% required)", () => {
+    const r = fuseStructure([item("虎符虎符", [0, 0, 100, 320])], [line(1, "調兵虎符在長信王之子隨元", "v")]);
+    // 虎符 (2 of 4 chars) is only 50% coverage → classical text stands
+    expect(r.lines[0]!.text).toBe("虎符虎符");
   });
 });

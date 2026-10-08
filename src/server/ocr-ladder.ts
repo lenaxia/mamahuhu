@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { OcrLine, OcrService, Result } from "./ports";
-import { fuseStructure, parseStructureLines, fusedToOcrLines, type FusionResult } from "./ocr-fusion";
+import { fuseStructure, parseStructureLines, fusedToOcrLines } from "./ocr-fusion";
 
 const run = promisify(execFile);
 
@@ -150,21 +150,14 @@ export function fuseAndServe(
   const result = fuseStructure(items, parseStructureLines(structureRaw), dims);
   const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
   if (totalChars === 0) return null;
-  const anchoredChars = result.lines.reduce((s, l) => s + l.chars.filter((c) => c.anchored).length, 0);
+  // fragment-inventory: every inventory line is anchored by construction;
+  // inferred lines (LLM-only columns) are not. Truthfulness floor: ≥20% of
+  // chars must live on real fragments, else the vector rung serves.
+  const anchoredChars = result.lines.filter((l) => !l.inferred).reduce((s, l) => s + l.chars.length, 0);
   const anchoredFraction = anchoredChars / totalChars;
   const fused = fusedToOcrLines(result);
-  // RESCUE: classical fragments no line claimed (LLM missed the column — or
-  // detector junk; ≥2 chars or a confident single) become lines of their own
-  let allChars = totalChars;
-  for (const f of result.unmatchedFragments) {
-    const m = [...f.text].length;
-    if (m < 2 && !(m === 1 && f.score >= 0.8)) continue;
-    const tall = (f.box[3] - f.box[1]) > (f.box[2] - f.box[0]) * 1.3 && m > 1;
-    fused.push({ text: f.text, box: f.box, dir: tall ? ("v" as const) : ("h" as const) });
-    allChars += m;
-  }
   const boxedChars = fused.filter((l) => l.charBoxes || l.box).reduce((s, l) => s + [...l.text].length, 0);
-  const boxedFraction = allChars > 0 ? boxedChars / allChars : 0;
+  const boxedFraction = boxedChars / totalChars;
   if (anchoredFraction < 0.2 || anchoredChars < 6 || boxedFraction < 0.5) return null;
   if (!fused.some((l) => l.charBoxes)) return null;
   return { lines: fused, anchoredFraction, boxedFraction, totalChars };
