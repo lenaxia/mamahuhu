@@ -241,29 +241,41 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   };
   const ordered = [...bandSort(keep.filter((f) => !tall(f)), "y", false), ...bandSort(keep.filter(tall), "x", true)];
 
-  // TEXT IMPROVEMENT: per fragment, the best LLM window covering ≥90% of it
+  // TEXT IMPROVEMENT: per fragment, the best LLM window covering it. A window
+  // accepts at ≥90% span OR ≥55% matched (CTC-tolerant). When a line improves
+  // EXACTLY ONE fragment and covers ≥60% of it, the line is that column's
+  // FULL reading — take it whole (slicing assumes 1:1 char counts and loses
+  // tails when the reading inserts chars: measured 密呈…鈞座 lost 座). Lines
+  // improving several fragments keep per-fragment slices (straddle case).
+  const accept = (w: { fStart: number; fEnd: number; matched: number } | null, m: number) =>
+    !!w && ((w.fEnd - w.fStart) / m >= 0.9 || w.matched >= 0.55 * m);
+  const windows = new Map<string, LocalAlign>();
+  const acceptingFrags: number[][] = lines.map(() => []);
+  for (const f of keep) {
+    const fChars = [...cleanNorm(f.it.text)];
+    for (let li = 0; li < lines.length; li++) {
+      const w = localAlign(fChars, lines[li]!.normChars);
+      windows.set(`${f.idx}:${li}`, w!);
+      if (accept(w, fChars.length)) acceptingFrags[li]!.push(f.idx);
+    }
+  }
   const improvedBy = new Map<number, string>();
-  for (const f of ordered) {
+  for (const f of keep) {
     const fChars = [...cleanNorm(f.it.text)];
     let best: { text: string; cov: number; score: number } | null = null;
-    for (const ln of lines) {
-      const w = localAlign(fChars, ln.normChars);
-      if (!w) continue;
-      const m = fChars.length;
-      const cov = (w.fEnd - w.fStart) / m;
-      // full-fragment reading: either the window spans ≥90% of the fragment,
-      // or it matched ≥75% of its chars with free-end trims at the borders
-      // (蘿↔夢: the window drops the mismatched head but the LLM line still
-      // reads the WHOLE fragment — extend the slice over the trimmed ends)
-      const accept = cov >= 0.9 || w.matched >= 0.6 * m;
-      if (!accept) continue;
-      const from = Math.max(0, w.startC - w.fStart);
-      const to = Math.min(ln.cleanChars.length, w.endC + (m - w.fEnd));
-      const slice = ln.cleanChars.slice(from, to).join("");
-      const rank = Math.max(cov, w.matched / m);
+    for (let li = 0; li < lines.length; li++) {
+      const w = windows.get(`${f.idx}:${li}`);
+      if (!w || !accept(w, fChars.length)) continue;
+      const cov = (w.fEnd - w.fStart) / fChars.length;
+      const whole = acceptingFrags[li]!.length === 1 && cov >= 0.6;
+      const slice = whole
+        ? lines[li]!.cleanChars.join("")
+        : lines[li]!.cleanChars.slice(Math.max(0, w.startC - w.fStart), Math.min(lines[li]!.cleanChars.length, w.endC + (fChars.length - w.fEnd))).join("");
+      if (!slice.trim()) continue;
+      const rank = Math.max(cov, w.matched / fChars.length);
       if (!best || rank > best.cov || (rank === best.cov && w.score > best.score)) best = { text: slice, cov: rank, score: w.score };
     }
-    if (best && best.text.trim()) improvedBy.set(f.idx, best.text);
+    if (best) improvedBy.set(f.idx, best.text);
   }
 
   // assemble fragment lines
