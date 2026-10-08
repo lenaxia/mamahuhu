@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { OcrLine, OcrService, Result } from "./ports";
+import { fuseStructure, parseStructureLines, fusedToOcrLines, type FusionResult } from "./ocr-fusion";
 
 const run = promisify(execFile);
 
@@ -124,6 +125,51 @@ Rules:
 
 interface Box { x1: number; y1: number; x2: number; y2: number }
 
+/** FUSION ATTEMPT as a pure function — the routing layer under test
+ *  (tests/unit/ocr-routing.test.ts replays committed classical+structure
+ *  fixtures through it; no network, no venv, runs in CI with the suite).
+ *
+ *  Coverage guarantees (owner-measured failure on prod 0.7.1/0.7.2: "only
+ *  captured half the lines" — the structure LLM's line SET varies per call;
+ *  whole columns were absent from its output. Fusion cannot transcribe lines
+ *  the structure call never emitted):
+ *  - UNMATCHED-FRAGMENT RESCUE: classical fragments no line claimed are
+ *    appended as classical-style lines (text + box) — columns the LLM missed
+ *    stay visible.
+ *
+ *  Serve gates, both required:
+ *  - anchored ≥ 0.2 of chars (≥6): positions must be substantially REAL
+ *  - BOXED ≥ 0.5 of chars (anchored/inferred/rescued): fusion must capture
+ *    at least half the content — partial loses to the vector rung's
+ *    complete positioning. */
+export function fuseAndServe(
+  items: RapidItem[],
+  structureRaw: string,
+  dims: { w: number; h: number },
+): { lines: OcrLine[]; anchoredFraction: number; boxedFraction: number; totalChars: number } | null {
+  const result = fuseStructure(items, parseStructureLines(structureRaw), dims);
+  const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
+  if (totalChars === 0) return null;
+  const anchoredChars = result.lines.reduce((s, l) => s + l.chars.filter((c) => c.anchored).length, 0);
+  const anchoredFraction = anchoredChars / totalChars;
+  const fused = fusedToOcrLines(result);
+  // RESCUE: classical fragments no line claimed (LLM missed the column — or
+  // detector junk; ≥2 chars or a confident single) become lines of their own
+  let allChars = totalChars;
+  for (const f of result.unmatchedFragments) {
+    const m = [...f.text].length;
+    if (m < 2 && !(m === 1 && f.score >= 0.8)) continue;
+    const tall = (f.box[3] - f.box[1]) > (f.box[2] - f.box[0]) * 1.3 && m > 1;
+    fused.push({ text: f.text, box: f.box, dir: tall ? ("v" as const) : ("h" as const) });
+    allChars += m;
+  }
+  const boxedChars = fused.filter((l) => l.charBoxes || l.box).reduce((s, l) => s + [...l.text].length, 0);
+  const boxedFraction = allChars > 0 ? boxedChars / allChars : 0;
+  if (anchoredFraction < 0.2 || anchoredChars < 6 || boxedFraction < 0.5) return null;
+  if (!fused.some((l) => l.charBoxes)) return null;
+  return { lines: fused, anchoredFraction, boxedFraction, totalChars };
+}
+
 export class LadderOcrService implements OcrService {
   constructor(private rapid: RapidOcrService, private llm: OcrService, private chatCfg?: { base: string; key: string; model: string }) {}
   available(): boolean { return this.llm.available(); }
@@ -202,17 +248,11 @@ export class LadderOcrService implements OcrService {
       if (process.env.OCR_FUSION === "1" && this.chatCfg) {
         if (items.length > 0) {
           try {
-            const { fuseStructure, parseStructureLines, fusedToOcrLines } = await import("./ocr-fusion");
             const raw = await this.chat(STRUCTURE_SYSTEM, b64, 4000);
-            const result = fuseStructure(items, parseStructureLines(raw), { w, h });
-            const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
-            const anchoredChars = result.lines.reduce((s, l) => s + l.chars.filter((c) => c.anchored).length, 0);
-            if (totalChars > 0 && anchoredChars >= 6 && anchoredChars / totalChars >= 0.2) {
-              const fused = fusedToOcrLines(result);
-              if (fused.some((l) => l.charBoxes)) {
-                this.lastServedBy = "fusion";
-                return { ok: true, value: { lines: fused, servedBy: "fusion" } };
-              }
+            const served = fuseAndServe(items, raw, { w, h });
+            if (served) {
+              this.lastServedBy = "fusion";
+              return { ok: true, value: { lines: served.lines, servedBy: "fusion" } };
             }
           } catch {
             /* fusion is best-effort — vector rung stands behind it */

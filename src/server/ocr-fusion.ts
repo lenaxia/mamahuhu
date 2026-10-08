@@ -55,7 +55,7 @@ export interface FusedLine {
 export interface FusionResult {
   lines: FusedLine[];
   /** classical fragments no line claimed — LLM misses or detector junk */
-  unmatchedFragments: { idx: number; text: string; box: [number, number, number, number] }[];
+  unmatchedFragments: { idx: number; text: string; box: [number, number, number, number]; score: number }[];
 }
 
 // ---------- tokenization ----------
@@ -578,28 +578,11 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
 
   let outLines: FusedLine[] = lines.map((_, li) => assemble(li));
 
-  // PAGE-LEVEL ANGLE PROPAGATION: a line anchored on ONE fragment has no
-  // line-local direction evidence — the prior axis (LLM dir) placed leaning
-  // columns straight down the box's center (letter-4920 明望: 313px-wide
-  // diagonal fragment, chars on a vertical thread — judge-verified wrong).
-  // Lines with ≥2 DISTINCT fragments carry real axes; when they agree tightly
-  // (one page = one handwriting slant), single-fragment lines adopt the median.
-  {
-    const evidence = outLines.filter((l) => l.angle !== null && new Set(l.matchedFragments).size >= 2).map((l) => l.angle!);
-    if (evidence.length) {
-      evidence.sort((a, b) => a - b);
-      const med = evidence[Math.floor(evidence.length / 2)]!;
-      if (Math.max(...evidence) - Math.min(...evidence) <= 25) {
-        const rad = (med * Math.PI) / 180;
-        const axis = { ux: Math.cos(rad), uy: Math.sin(rad) };
-        outLines = outLines.map((l, li) => {
-          if (l.angle === null || new Set(l.matchedFragments).size >= 2) return l;
-          const diff = Math.abs(((l.angle - med + 540) % 360) - 180);
-          return diff > 5 ? assemble(li, axis) : l;
-        });
-      }
-    }
-  }
+  // (CONSOLIDATED AWAY: page-angle propagation once overrode single-fragment
+  // lines' axes with a page median — subsumed by per-fragment box-lean axes,
+  // and it was a poison vector: one bad pair axis became "page evidence" and
+  // overrode every correct column, measured 20°→111° on IMG_4921. Layout
+  // inference below still uses the page median for unanchored lines.)
 
   // LAYOUT INFERENCE for unanchored lines (the "classical missing a line
   // entirely" case — measured on the owner's letter photo: classical covered
@@ -695,7 +678,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   for (const l of outLines) for (const f of l.matchedFragments) used.add(f);
   return {
     lines: outLines,
-    unmatchedFragments: frags.filter((f) => f.chars.length > 0 && !used.has(f.idx)).map((f) => ({ idx: f.idx, text: items[f.idx]!.text, box: f.box })),
+    unmatchedFragments: frags.filter((f) => f.chars.length > 0 && !used.has(f.idx)).map((f) => ({ idx: f.idx, text: items[f.idx]!.text, box: f.box, score: items[f.idx]!.score })),
   };
 }
 
