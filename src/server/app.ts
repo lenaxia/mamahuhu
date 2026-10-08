@@ -66,6 +66,7 @@ import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from
 import { parseImageDims } from "./imageinfo";
 import { toTraditional } from "../shared/cedict";
 import { annotateJyut, segmentJyut } from "../shared/jyutping";
+import { APP_VERSION } from "./version";
 import type { AskKind } from "../shared/api";
 import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService, DescribeService, TaggingService, FollowUpService } from "./ports";
 
@@ -361,7 +362,7 @@ async function buildPhrase(
     return renderWord(hit);
   };
 
-  app.get("/healthz", (c) => c.json({ ok: true, dictEntries: dictionary.count }));
+  app.get("/healthz", (c) => c.json({ ok: true, dictEntries: dictionary.count, version: APP_VERSION }));
   app.use("/api/*", identityMiddleware(sql));
 
   // ---- me ----

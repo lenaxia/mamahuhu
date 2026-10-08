@@ -6,6 +6,7 @@ import { Segmented } from "../components/Segmented";
 import { Sheet } from "../components/Sheet";
 import { ttsInfo } from "../tts";
 import { useMe } from "../state";
+import { APP_VERSION } from "../version";
 
 export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }): React.JSX.Element {
   const { me, setMe } = useMe();
@@ -95,9 +96,8 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
 
         {import.meta.env.DEV && <DevUserSwitcher />}
 
+        <ServerVersion />
         <p className="text-center text-[11px] text-neutral-400">
-          Mamahuhu 馬馬虎虎 · v0.4.7
-          <br />
           identity comes from your reverse proxy ({me.name})
         </p>
       </div>
@@ -196,6 +196,23 @@ export function VarietiesPicker({ me, onChange }: { me: Me; onChange: (p: { vari
         </p>
       )}
     </div>
+  );
+}
+
+function ServerVersion(): React.JSX.Element {
+  const [server, setServer] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/healthz")
+      .then((r) => r.json())
+      .then((j: { version?: string }) => setServer(j.version ?? null))
+      .catch(() => setServer(null));
+  }, []);
+  const mismatch = server !== null && server !== APP_VERSION;
+  return (
+    <p className="text-center text-[11px] text-neutral-400">
+      Mamahuhu 馬馬虎虎 · v{APP_VERSION}
+      {mismatch && <span className="text-amber-600 dark:text-amber-400"> · server v{server} — refresh to update</span>}
+    </p>
   );
 }
 
