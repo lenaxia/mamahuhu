@@ -181,7 +181,7 @@ export class LadderOcrService implements OcrService {
     return raw.replace(/```[a-z]*|```/gi, "").trim();
   }
 
-  async extract(image: Blob): Promise<Result<{ lines: OcrLine[] }>> {
+  async extract(image: Blob): Promise<Result<{ lines: OcrLine[]; servedBy?: string }>> {
     let items: RapidItem[] = [];
     let w = 0, h = 0;
     let eligible = false; // classical sees coherent LINE structure (print, letters, grids)
@@ -211,7 +211,7 @@ export class LadderOcrService implements OcrService {
               const fused = fusedToOcrLines(result);
               if (fused.some((l) => l.charBoxes)) {
                 this.lastServedBy = "fusion";
-                return { ok: true, value: { lines: fused } };
+                return { ok: true, value: { lines: fused, servedBy: "fusion" } };
               }
             }
           } catch {
@@ -259,7 +259,7 @@ export class LadderOcrService implements OcrService {
               /* census is best-effort — classical result stands alone */
             }
           }
-          return { ok: true, value: { lines } };
+          return { ok: true, value: { lines, servedBy: "classical" } };
         }
       }
     } catch {

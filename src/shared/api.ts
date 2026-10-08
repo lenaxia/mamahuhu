@@ -236,6 +236,8 @@ export const OcrResSchema = z.object({
   fullText: z.string(),
   /** true when boxes are present (overlay mode) */
   positioned: z.boolean(),
+  /** which OCR rung served: classical | fusion | llm (vector) — diagnostics */
+  servedBy: z.string().optional(),
   /** textless photo → ranked Mandarin name tags for everything visible */
   tags: z.array(IdentifySchema).max(6).optional(),
   /** first tag, kept for convenience/back-compat */

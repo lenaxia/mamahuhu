@@ -573,6 +573,7 @@ async function buildPhrase(
     }
     const res = await deps.ocr.extract(new File([new Uint8Array(nBytes)], image.name || "page.jpg", { type: "image/jpeg" }));
     if (!res.ok) return c.json({ error: res.error }, 502);
+    console.log(`[ocr] servedBy=${res.value.servedBy ?? "gateway"} lines=${res.value.lines.length}`);
     const stored = await storePhoto(new Uint8Array(nBytes));
 
 
@@ -768,7 +769,7 @@ async function buildPhrase(
       fullTranslation(lineTexts.join("\n")),
     ]);
     const payload = OcrResSchema.parse({
-      lines, fullText: lineTexts.join("\n"), positioned,
+      lines, fullText: lineTexts.join("\n"), positioned, servedBy: res.value.servedBy,
       tags: objTags.length ? objTags : undefined,
       identify: objTags[0],
       fullTranslation: fullTranslationText,
