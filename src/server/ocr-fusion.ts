@@ -47,6 +47,9 @@ export interface FusedLine {
   /** gap markers preserved: atChar = index into clean text, widths in char-widths */
   gaps: { atChar: number; widths: number }[];
   matchedFragments: number[];
+  /** geometry LAYOUT-INFERRED from anchored neighbors (no fragment anchored
+   *  this line — position from page axis/pitch + line order) */
+  inferred?: boolean;
 }
 
 export interface FusionResult {
@@ -225,6 +228,42 @@ function axisOf(anchors: Anchor[], dir: "h" | "v"): { ux: number; uy: number; fr
   return l < 1e-6 ? prior : { ux: sx / l, uy: sy / l, fromLLM: false };
 }
 
+/** axis from a single fragment's own box: a strip of m glyphs in a w×h AABB
+ *  constrains glyph size and slant — hypot(w,h) ≈ m·g + g·√2 solves g, then
+ *  the perpendicular extent solves the slant. Fixes single-anchor lines whose
+ *  fragments LEAN (letter-4920: 313px-wide diagonal column placed straight
+ *  down its center-x) and self-corrects wrong dir labels (a horizontal box
+ *  labeled "v" yields a horizontal axis — the curve-s case). */
+/** axis from a single fragment's own box. Orientation comes from the BOX
+ *  (chars-per-extent), not the LLM dir label — banner fragments are columns
+ *  labeled "h". A strip of m glyphs in a w×h AABB that is NOT a clean row/
+ *  column is a LEANING strip: hypot(w,h) ≈ m·g + g·√2 solves the glyph size,
+ *  the along-axis extent solves the slant (letter-4920: a 313px-wide diagonal
+ *  column previously placed straight down its center-x). */
+function axisFromBox(f: { box: [number, number, number, number]; chars: string[] }, dir: "h" | "v"): { ux: number; uy: number } {
+  const w = f.box[2] - f.box[0], h = f.box[3] - f.box[1];
+  const m = Math.max(2, f.chars.length);
+  const gX = w / m, gY = h / m; // per-char extent each way
+  if (gY >= gX * 1.3) {
+    // column-ish: clean column unless the box is far wider than one glyph
+    if (w <= gY * 1.8) return { ux: 0, uy: 1 };
+    const g = Math.hypot(w, h) / (m + Math.SQRT2);
+    const sinT = Math.min(0.999, Math.max(0.05, (h - g) / (m * g)));
+    return { ux: Math.sqrt(1 - sinT * sinT), uy: sinT }; // lean sign +x (measured)
+  }
+  // row-ish (wider per char than tall). A box ~one glyph tall is a flat row.
+  // A TALL box is either a leaning v-labeled strip (diagonal handwriting — the
+  // letter-diagonal case: 1197×546 for 9 chars leans ~22°) or grouped print
+  // rows (poster detectors stack rows; those pages pass the classical gate and
+  // must NOT tilt). dir "v" + wide = leaning; dir "h" + tall = grouped rows.
+  if (h > gX * 2.5 && dir === "v") {
+    const g = Math.hypot(w, h) / (m + Math.SQRT2);
+    const sinT = Math.min(0.999, Math.max(0.05, (h - g) / (m * g)));
+    return { ux: Math.sqrt(1 - sinT * sinT), uy: sinT };
+  }
+  return { ux: 1, uy: 0 };
+}
+
 // ---------- fusion ----------
 
 export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[]): FusionResult {
@@ -339,7 +378,10 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
     if (!moved) break;
   }
 
-  const outLines: FusedLine[] = lines.map((ln, li) => {
+  // per-line assembly — re-runnable with an axis override (page-level angle
+  // propagation for single-fragment lines, see below)
+  const assemble = (li: number, axisOverride?: { ux: number; uy: number }): FusedLine => {
+    const ln = lines[li]!;
     const mk = (chars: FusedChar[], angle: number | null, dirFromLLM: boolean, matched: number[]): FusedLine =>
       ({ n: ln.n, dir: ln.dir, text: ln.cleanChars.join(""), chars, angle, dirFromLLM, gaps: ln.gaps, matchedFragments: matched });
 
@@ -374,13 +416,23 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
         pEnd: [scx + u.ux * half * pitch, scy + u.uy * half * pitch],
       };
     };
-    // bootstrap axis from chain fragment centers, refine once with anchor endpoints
+    // bootstrap axis from chain fragment centers, refine once with anchor endpoints.
+    // <2 DISTINCT fragments = no line-local direction evidence → the dominant
+    // fragment's own box carries the axis (lean model); page propagation (below)
+    // overrides with real multi-fragment evidence when the page has it.
     const cxs = chains[li]!.map((c) => fragByIdx.get(c.frag)!.cx);
     const cys = chains[li]!.map((c) => fragByIdx.get(c.frag)!.cy);
     const rng = (a: number[]) => Math.max(...a) - Math.min(...a);
-    const boot = rng(cxs) >= rng(cys) ? { ux: 1, uy: 0 } : { ux: 0, uy: 1 };
+    const distinct = new Set(chains[li]!.map((c) => c.frag)).size;
+    const dominant = chains[li]!.slice().sort((a, b) => fragByIdx.get(b.frag)!.chars.length - fragByIdx.get(a.frag)!.chars.length)[0]!;
+    const bootFrag = fragByIdx.get(dominant.frag)!;
+    const boot = distinct >= 2
+      ? (rng(cxs) >= rng(cys) ? { ux: 1, uy: 0 } : { ux: 0, uy: 1 })
+      : axisFromBox(bootFrag, ln.dir);
     let anchors = chains[li]!.map((c) => mkAnchor(c, boot)).sort((a, b) => a.oStart - b.oStart);
-    const { ux, uy, fromLLM } = axisOf(anchors, ln.dir);
+    const own = distinct >= 2 ? axisOf(anchors, ln.dir) : { ...axisFromBox(bootFrag, ln.dir), fromLLM: true };
+    const { ux, uy } = axisOverride ?? own;
+    const fromLLM = axisOverride ? false : own.fromLLM;
     anchors = chains[li]!.map((c) => mkAnchor(c, { ux, uy })).sort((a, b) => a.oStart - b.oStart);
 
     const chars: FusedChar[] = ln.cleanChars.map((ch, oi) => {
@@ -436,7 +488,106 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
     const angle = Math.round((Math.atan2(ay / cnt, ax / cnt) * 180) / Math.PI);
 
     return mk(chars, angle, fromLLM, chains[li]!.map((c) => c.frag));
-  });
+  };
+
+  let outLines: FusedLine[] = lines.map((_, li) => assemble(li));
+
+  // PAGE-LEVEL ANGLE PROPAGATION: a line anchored on ONE fragment has no
+  // line-local direction evidence — the prior axis (LLM dir) placed leaning
+  // columns straight down the box's center (letter-4920 明望: 313px-wide
+  // diagonal fragment, chars on a vertical thread — judge-verified wrong).
+  // Lines with ≥2 DISTINCT fragments carry real axes; when they agree tightly
+  // (one page = one handwriting slant), single-fragment lines adopt the median.
+  {
+    const evidence = outLines.filter((l) => l.angle !== null && new Set(l.matchedFragments).size >= 2).map((l) => l.angle!);
+    if (evidence.length) {
+      evidence.sort((a, b) => a - b);
+      const med = evidence[Math.floor(evidence.length / 2)]!;
+      if (Math.max(...evidence) - Math.min(...evidence) <= 25) {
+        const rad = (med * Math.PI) / 180;
+        const axis = { ux: Math.cos(rad), uy: Math.sin(rad) };
+        outLines = outLines.map((l, li) => {
+          if (l.angle === null || new Set(l.matchedFragments).size >= 2) return l;
+          const diff = Math.abs(((l.angle - med + 540) % 360) - 180);
+          return diff > 5 ? assemble(li, axis) : l;
+        });
+      }
+    }
+  }
+
+  // LAYOUT INFERENCE for unanchored lines (the "classical missing a line
+  // entirely" case — measured on the owner's letter photo: classical covered
+  // only 4 of 9 columns, 85 chars had no fragments). Anchored lines establish
+  // the page axis, pitch, and reading-order direction on the cross axis; the
+  // LLM's line NUMBERING (relative structure, its strength) slots unanchored
+  // lines between their anchored neighbors. Inferred ≠ anchored — chars stay
+  // anchored:false — but they get positions instead of the loose-words list.
+  {
+    const anchoredLines = outLines.filter((l) => l.angle !== null && l.chars.some((c) => c.anchored && c.box));
+    if (anchoredLines.length >= 1 && outLines.some((l) => l.angle === null && l.chars.length)) {
+      // page axis from anchored line angles (median)
+      const angles = anchoredLines.map((l) => l.angle!).sort((a, b) => a - b);
+      const medAngle = angles[Math.floor(angles.length / 2)]!;
+      const rad = (medAngle * Math.PI) / 180;
+      const ax = Math.cos(rad), ay = Math.sin(rad);
+      // cross axis (perpendicular)
+      const cxn = -ay, cyn = ax;
+      // per anchored line: start char center, end char center, pitch, cross position
+      const info = anchoredLines.map((l) => {
+        const boxes = l.chars.filter((c) => c.anchored && c.box).map((c) => c.box!) as [number, number, number, number][];
+        const first = boxes[0]!, last = boxes[boxes.length - 1]!;
+        const mid = boxes[Math.floor(boxes.length / 2)]!;
+        const sizes = boxes.map((b) => Math.max(b[2] - b[0], b[3] - b[1]));
+        sizes.sort((a, b) => a - b);
+        return {
+          n: l.n,
+          start: [(first[0] + first[2]) / 2, (first[1] + first[3]) / 2] as [number, number],
+          end: [(last[0] + last[2]) / 2, (last[1] + last[3]) / 2] as [number, number],
+          center: [(mid[0] + mid[2]) / 2, (mid[1] + mid[3]) / 2] as [number, number],
+          pitch: sizes[Math.floor(sizes.length / 2)]!,
+        };
+      });
+      // reading-order sign on the cross axis: does cross-position fall as n rises?
+      const pairs = info.flatMap((a, i) => info.slice(i + 1).map((b) => ({ dn: b.n - a.n, dc: (b.center[0] - a.center[0]) * cxn + (b.center[1] - a.center[1]) * cyn })));
+      let pos = 0, neg = 0;
+      for (const p of pairs) { if (p.dn === 0) continue; if (p.dc * p.dn > 0) pos++; else if (p.dc * p.dn < 0) neg++; }
+      if (pos + neg > 0) { // ambiguous only when a single anchor exists (no pairs)
+        // median anchored pitch + median inter-anchor cross gap for extrapolation
+        const pitches = info.map((i) => i.pitch).sort((a, b) => a - b);
+        const pitch = pitches[Math.floor(pitches.length / 2)]!;
+        const sign = pos >= neg ? 1 : -1;
+        const byN = [...info].sort((a, b) => a.n - b.n);
+        const crossOf = (p: [number, number]) => p[0] * cxn + p[1] * cyn;
+        const alongOf = (p: [number, number]) => p[0] * ax + p[1] * ay;
+        const gaps: number[] = [];
+        for (let i = 1; i < byN.length; i++) gaps.push(Math.abs(crossOf(byN[i]!.center) - crossOf(byN[i - 1]!.center)));
+        gaps.sort((a, b) => a - b);
+        const colGap = gaps.length ? gaps[Math.floor(gaps.length / 2)]! : pitch * 1.2;
+        const startAlong = [...info].map((i) => alongOf(i.start)).sort((a, b) => a - b);
+        const baseAlong = startAlong[Math.floor(startAlong.length / 2)]!; // columns start near a common top
+        outLines = outLines.map((l) => {
+          if (l.angle !== null || !l.chars.length) return l;
+          // nearest anchored neighbors in line order
+          const before = [...info].filter((i) => i.n < l.n).sort((a, b) => b.n - a.n)[0];
+          const after = [...info].filter((i) => i.n > l.n).sort((a, b) => a.n - b.n)[0];
+          let cross: number;
+          if (before && after) cross = (crossOf(before.center) * (after.n - l.n) + crossOf(after.center) * (l.n - before.n)) / (after.n - before.n);
+          else if (before) cross = crossOf(before.center) + sign * colGap;
+          else if (after) cross = crossOf(after.center) - sign * colGap;
+          else return l;
+          // place chars along the page axis from the common start
+          const chars: FusedChar[] = l.chars.map((c, k) => {
+            const along = baseAlong + (k + 0.5) * pitch;
+            const px = ax * along + cxn * cross;
+            const py = ay * along + cyn * cross;
+            const hp = pitch / 2;
+            return { char: c.char, box: [Math.round(px - hp), Math.round(py - hp), Math.round(px + hp), Math.round(py + hp)], anchored: false };
+          });
+          return { ...l, chars, angle: medAngle, inferred: true };
+        });
+      }
+    }
+  }
 
   const used = new Set<number>();
   for (const l of outLines) for (const f of l.matchedFragments) used.add(f);

@@ -184,8 +184,24 @@ export class LadderOcrService implements OcrService {
               for (const g of gaps.slice(0, 12)) {
                 const text = await this.cropRecognize(bytes, g, w, h);
                 if (text && /\p{Script=Han}/u.test(text) && !classicalText.includes(text.replace(/\s+/g, ""))) {
-                  const tall = g.y2 - g.y1 > (g.x2 - g.x1) * 1.3 && [...text].length > 1;
-                  lines.push({ text, box: [g.x1, g.y1, g.x2, g.y2], dir: tall ? "v" : "h" });
+                  // a crop can contain SEVERAL physical lines — split on
+                  // newlines and tile the crop box (measured: 76-char \n-laden
+                  // crop transcriptions were becoming single monster lines)
+                  const parts = text.split(/\n+/).map((t) => t.trim()).filter((t) => /\p{Script=Han}/u.test(t) && !classicalText.includes(t.replace(/\s+/g, "")));
+                  parts.forEach((part, pi) => {
+                    const tall = g.y2 - g.y1 > (g.x2 - g.x1) * 1.3 && [...part].length > 1;
+                    let box: [number, number, number, number] = [g.x1, g.y1, g.x2, g.y2];
+                    if (parts.length > 1) {
+                      if (tall) {
+                        const hStep = (g.y2 - g.y1) / parts.length;
+                        box = [g.x1, Math.round(g.y1 + hStep * pi), g.x2, Math.round(g.y1 + hStep * (pi + 1))];
+                      } else {
+                        const wStep = (g.x2 - g.x1) / parts.length;
+                        box = [Math.round(g.x1 + wStep * pi), g.y1, Math.round(g.x1 + wStep * (pi + 1)), g.y2];
+                      }
+                    }
+                    lines.push({ text: part, box, dir: tall ? "v" : "h" });
+                  });
                 }
               }
             } catch {
@@ -198,17 +214,23 @@ export class LadderOcrService implements OcrService {
       // FUSION rung (OCR_FUSION=1): classical boxes + LLM text/structure,
       // deterministic alignment (src/server/ocr-fusion.ts). Classical must have
       // produced SOMETHING to anchor against; curves with 0 items go straight
-      // to the vector rung. Serves only when at least one line anchored —
-      // fusion must beat the fallback, never degrade to list layout.
+      // to the vector rung. Serves only when anchoring is substantial (≥20% of
+      // chars, ≥6 chars) — a 1-line fluke must not displace the vector rung,
+      // which positions every line (with its known 2x error modes).
       if (this.chatCfg && process.env.OCR_FUSION === "1" && items.length > 0) {
         try {
           const { fuseStructure, parseStructureLines, fusedToOcrLines } = await import("./ocr-fusion");
           const raw = await this.chat(STRUCTURE_SYSTEM, Buffer.from(bytes).toString("base64"), 4000);
           const structure = parseStructureLines(raw);
-          const fused = fusedToOcrLines(fuseStructure(items, structure));
-          if (fused.some((l) => l.charBoxes)) {
-            this.lastServedBy = "fusion";
-            return { ok: true, value: { lines: fused } };
+          const result = fuseStructure(items, structure);
+          const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
+          const anchoredChars = result.lines.reduce((s, l) => s + l.chars.filter((c) => c.anchored).length, 0);
+          if (totalChars > 0 && anchoredChars >= 6 && anchoredChars / totalChars >= 0.2) {
+            const fused = fusedToOcrLines(result);
+            if (fused.some((l) => l.charBoxes)) {
+              this.lastServedBy = "fusion";
+              return { ok: true, value: { lines: fused } };
+            }
           }
         } catch {
           /* fusion is best-effort — vector rung stands behind it */

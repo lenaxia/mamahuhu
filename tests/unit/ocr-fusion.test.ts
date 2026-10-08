@@ -229,6 +229,40 @@ describe("direction & curves", () => {
   });
 });
 
+describe("layout inference (classical missing lines entirely)", () => {
+  it("unanchored lines slot between anchored neighbors by line order, on the page axis", () => {
+    // vertical letter, columns read right-to-left: n=1 at x≈800, n=3 at x≈400
+    const r = fuseStructure(
+      [item("甲乙", [760, 100, 840, 300]), item("戊己", [360, 100, 440, 300])],
+      [line(1, "甲乙", "v"), line(2, "丙丁", "v"), line(3, "戊己", "v")],
+    );
+    const l2 = r.lines[1]!;
+    expect(l2.inferred).toBe(true);
+    expect(l2.chars.every((c) => !c.anchored && c.box)).toBe(true); // positioned but honestly unanchored
+    const xs = l2.chars.map((c) => (c.box![0] + c.box![2]) / 2);
+    expect(Math.abs(xs[0]! - 600)).toBeLessThan(40); // between the two columns
+    const ys = l2.chars.map((c) => (c.box![1] + c.box![3]) / 2);
+    expect(ys[1]!).toBeGreaterThan(ys[0]!); // runs top→bottom like its neighbors
+  });
+
+  it("unanchored line beyond the last anchor extrapolates at the column gap", () => {
+    const r = fuseStructure(
+      [item("甲乙", [760, 100, 840, 300]), item("戊己", [360, 100, 440, 300])],
+      [line(1, "甲乙", "v"), line(3, "戊己", "v"), line(4, "庚辛", "v")],
+    );
+    const l4 = r.lines[2]!;
+    expect(l4.inferred).toBe(true);
+    const x = (l4.chars[0]!.box![0]! + l4.chars[0]!.box![2]!) / 2;
+    expect(x).toBeLessThan(400); // left of the last column (reading order r→l)
+  });
+
+  it("no anchored neighbors at all → stays loose (no inference from nothing)", () => {
+    const r = fuseStructure([], [line(1, "日夜奔波", "v")]);
+    expect(r.lines[0]!.inferred).toBeUndefined();
+    expect(r.lines[0]!.chars.every((c) => !c.box)).toBe(true);
+  });
+});
+
 describe("robustness (pathological inputs)", () => {
   it("empty items, empty lines, gap-only lines: no crash, honest output", () => {
     const r = fuseStructure([], []);

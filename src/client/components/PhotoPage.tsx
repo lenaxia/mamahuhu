@@ -312,7 +312,7 @@ export function PhotoPage({
         return (
           <>
             <div className="text-xs uppercase tracking-wide text-neutral-400">
-              {page.positioned ? "words (no positions detected)" : "words"}
+              {page.positioned ? "words (without positions)" : "words"}
             </div>
             <div className="flex flex-wrap gap-2">
               {loose.map(({ wd, li, wi }) => {
