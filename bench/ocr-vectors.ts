@@ -33,7 +33,7 @@ export const FIXTURES: Fixture[] = [
   { name: "wordcloud-color", file: "bench/fixtures/wordcloud-color.png", dims: { w: 695, h: 458 },
     known: [], minBlocks: 40, maxDupes: 40 }, // repeats are GENUINE in word clouds — no dedupe gate
   { name: "wordcloud-black", file: "bench/fixtures/wordcloud-black.jpg", dims: { w: 1125, h: 1104 },
-    known: [], minBlocks: 0, maxDupes: 0 }, // honest-zero fixture: gates are structural only
+    known: [], minBlocks: 0, maxDupes: 40 }, // honest-zero floor; repeats GENUINE in word clouds → no dedupe gate (same as color). Gate 0 was set pre-truncation-salvage when this yielded ~0 blocks — a surviving 2× repeat is not the 11× loop signature. RapidOCR-excluded (sandbox OOM)
   { name: "grid-handwriting", file: "bench/fixtures/grid-handwriting.jpg", dims: { w: 4032, h: 3024 },
     known: ["則", "崩", "奠", "侗", "合"], minBlocks: 4, maxDupes: 1 },
   { name: "curve-arc", file: "bench/fixtures/curve-arc.png", dims: { w: 1000, h: 700 },
