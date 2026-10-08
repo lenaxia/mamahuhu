@@ -255,7 +255,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       // or it matched ≥75% of its chars with free-end trims at the borders
       // (蘿↔夢: the window drops the mismatched head but the LLM line still
       // reads the WHOLE fragment — extend the slice over the trimmed ends)
-      const accept = cov >= 0.9 || w.matched >= 0.75 * m;
+      const accept = cov >= 0.9 || w.matched >= 0.6 * m;
       if (!accept) continue;
       const from = Math.max(0, w.startC - w.fStart);
       const to = Math.min(ln.cleanChars.length, w.endC + (m - w.fEnd));
@@ -283,7 +283,15 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   // (cross-axis spacing ≥1.8× the column gap, plus the outer edges), in the
   // LLM's reading order; more variants than free slots = duplicate readings,
   // dropped. Genuine repeats always have their own fragments or slots.
-  const llmOnly = lines.filter((ln) => ln.cleanChars.length >= 2 && ![...usedFragText].some((t) => covers(t, ln.cleanChars.join(""))));
+  const coveredByInventory = (ln: { normChars: string[] }) => {
+    for (const f of keep) {
+      const fChars = [...cleanNorm(f.it.text)];
+      const w = localAlign(fChars, ln.normChars);
+      if (w && (w.matched >= 0.5 * fChars.length || w.matched >= 0.5 * ln.normChars.length)) return true;
+    }
+    return false;
+  };
+  const llmOnly = lines.filter((ln) => ln.cleanChars.length >= 2 && !coveredByInventory(ln));
   const dropped: { n: number; text: string }[] = [];
   if (outLines.length && llmOnly.length) {
     const angles = outLines.map((l) => l.angle!).sort((a, b) => a - b);
