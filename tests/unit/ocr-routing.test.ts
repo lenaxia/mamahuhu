@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fuseAndServe } from "../../src/server/ocr-ladder";
+import { parseStructureLines } from "../../src/server/ocr-fusion";
 import type { ClassicalItem } from "../../src/server/ocr-fusion";
 
 const dir = "bench/fixtures/ladder";
@@ -79,4 +80,44 @@ describe("OCR routing regression (committed fixtures, CI-safe)", () => {
       }
     });
   }
+});
+
+describe("letter-diagonal transcription baseline (owner-confirmed structure)", () => {
+  const truth = JSON.parse(readFileSync("bench/fixtures/ladder/letter-diagonal.truth.json", "utf8")) as {
+    lines: string[]; charCounts: number[]; minLineCount: number; minSimilarity: number;
+  };
+  const similarity = (a: string, b: string) => {
+    const A = [...a], B = [...b];
+    let hit = 0;
+    for (const c of new Set(A)) hit += Math.min(A.filter((x) => x === c).length, B.filter((x) => x === c).length);
+    return hit / Math.max(1, A.length);
+  };
+
+  // EXPECTED-FAILURE: the requirement is 90%; measured 80% (2026-10-08, deterministic
+  // across 3 live runs + the cached sample). Root cause: the structure prompt's
+  // line-splitting halves the 15-20-char columns, and fusion's one-line-per-slot
+  // rule drops the second halves as duplicate readings. Closing this = slot
+  // stacking for continuation lines (and/or prompt A/B per standing rule).
+  it.fails("the committed structure fixture meets the baseline: 9 lines, counts ±1, ≥90% chars", () => {
+    const structure = parseStructureLines(loadStructure("letter-diagonal"));
+    expect(structure.length).toBeGreaterThanOrEqual(truth.minLineCount);
+    const sorted = [...structure.map((l) => [...l.text].length)].sort((a, b) => a - b);
+    const sortedTruth = [...truth.charCounts].sort((a, b) => a - b);
+    for (let i = 0; i < sortedTruth.length; i++) expect(sorted[i]).toBeGreaterThanOrEqual(sortedTruth[i]! - 1);
+    const got = structure.map((l) => l.text).join("");
+    const want = truth.lines.join("");
+    expect(similarity(got, want), `structure transcription ${(similarity(got, want) * 100).toFixed(0)}% of baseline`).toBeGreaterThanOrEqual(truth.minSimilarity);
+  });
+
+  it.fails("content anchors survive fusion: every baseline line's chars appear in the fused output ≥80%", async () => {
+    const cls = loadClassical("letter-diagonal");
+    const structure = loadStructure("letter-diagonal");
+    const served = fuseAndServe(cls.items, structure, { w: cls.w, h: cls.h });
+    if (!served) return; // vector-served variant — content gate applies to transcription above
+    const got = served.lines.map((l) => l.text).join("");
+    for (const line of truth.lines) {
+      const s = similarity(line, got);
+      expect(s, `baseline line "${line.slice(0, 10)}…" only ${(s * 100).toFixed(0)}% present`).toBeGreaterThanOrEqual(0.8 * similarity(line, truth.lines.join("")));
+    }
+  });
 });

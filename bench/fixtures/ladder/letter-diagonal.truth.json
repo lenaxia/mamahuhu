@@ -1,0 +1,35 @@
+{
+  "image": "bench/fixtures/letter-diagonal.jpg — 2.7MB original camera photo (EXIF-verified, NOT an app screenshot)",
+  "source": "owner-provided line structure (char counts are ground truth); transcription = consensus of 3 classical rotations + 5 vision passes, fitted to the owner counts",
+  "lines": [
+    "密呈太傅大人钧座",
+    "年職日夜奔波詳查舊案終得關鍵線索回稟",
+    "十七年前魏嚴家將魏祁林所掌調兵虎符一事如",
+    "今已有確鑿證據證實卑職多方查證該虎符",
+    "確為真品現調兵虎符在長信王之子隨元青",
+    "春手中卑職深知此事干系重大不敢有絲",
+    "毫耽擱特如急呈此家信將詳情如實稟",
+    "明望太傅大人能依據此重要線索統",
+    "籌全局"
+  ],
+  "charCounts": [
+    8,
+    18,
+    20,
+    18,
+    18,
+    17,
+    16,
+    15,
+    3
+  ],
+  "minLineCount": 9,
+  "minSimilarity": 0.9,
+  "uncertain": [
+    "L2C1 年/卑",
+    "L2C5 奔/渡",
+    "L2C9 舊/淵",
+    "L2C13 關",
+    "L2C15 area: owner says 溯 appears"
+  ]
+}
