@@ -1,7 +1,7 @@
 // Structure-fusion matcher unit tests — synthetic cases for every edge in the
 // design matrix. All geometry asserts are in ORIGINAL pixel space.
 import { describe, expect, it } from "vitest";
-import { fuseStructure, parseStructureTokens, type ClassicalItem, type StructureLine } from "../../src/server/ocr-fusion";
+import { fuseStructure, parseStructureTokens, parseStructureLines, fusedToOcrLines, type ClassicalItem, type StructureLine } from "../../src/server/ocr-fusion";
 
 const item = (text: string, box: [number, number, number, number]): ClassicalItem => ({ text, box, score: 0.9 });
 const line = (n: number, text: string, dir: "h" | "v" = "h"): StructureLine => ({ n, text, dir });
@@ -13,6 +13,48 @@ describe("parseStructureTokens", () => {
     const t = parseStructureTokens("我愛你⟪2⟫你是我的⟪1.5⟫END");
     expect(t.filter((x) => x.char).map((x) => x.char).join("")).toBe("我愛你你是我的END");
     expect(t.filter((x) => x.gap).map((x) => x.gap)).toEqual([2, 1.5]);
+  });
+});
+
+describe("parseStructureLines (raw LLM response)", () => {
+  it("accepts fenced JSON, bare arrays, drops gap-only/empty lines", () => {
+    const fenced = '```json\n{"lines":[{"n":1,"text":"親近自然","dir":"h"},{"n":2,"text":"⟪3⟫","dir":"v"}]}\n```';
+    expect(parseStructureLines(fenced)).toEqual([{ n: 1, text: "親近自然", dir: "h" }]);
+    const bare = 'noise [{"text":"甲乙","dir":"v"}] trailing';
+    expect(parseStructureLines(bare)).toEqual([{ n: 1, text: "甲乙", dir: "v" }]);
+    expect(parseStructureLines("no json at all")).toEqual([]);
+    expect(parseStructureLines('{"lines":[{"text":"甲","dir":"bogus"}]}')).toEqual([{ n: 1, text: "甲", dir: "h" }]);
+  });
+});
+
+describe("fusedToOcrLines (app contract conversion)", () => {
+  it("anchored line → charBoxes + union box + dir from GEOMETRY (steep axis wins over LLM dir)", () => {
+    const r = fuseStructure(
+      [item("親近", [0, 0, 60, 100]), item("自然", [30, 160, 90, 260])],
+      [{ n: 1, text: "親近自然", dir: "h" }], // LLM says h; anchors say steep
+    );
+    const out = fusedToOcrLines(r);
+    expect(out[0]!.charBoxes).toHaveLength(4);
+    expect(out[0]!.angle).toBeGreaterThanOrEqual(60); // steep diagonal
+    expect(out[0]!.angle).toBeLessThanOrEqual(90);
+    expect(out[0]!.dir).toBe("v"); // geometry beats the LLM label
+    const [x1, y1, x2, y2] = out[0]!.box!;
+    expect(x1).toBeGreaterThanOrEqual(-40); // union hugs the anchor span
+    expect(y1).toBeGreaterThanOrEqual(-40);
+    expect(x2).toBeLessThanOrEqual(130);
+    expect(y2).toBeLessThanOrEqual(300);
+    // axis-aligned case: dir stays h, boxes inside the fragment
+    const r2 = fuseStructure([item("親近自然", [0, 0, 400, 100])], [{ n: 1, text: "親近自然", dir: "h" }]);
+    const out2 = fusedToOcrLines(r2);
+    expect(out2[0]!.dir).toBe("h");
+    expect(out2[0]!.box![0]).toBeGreaterThanOrEqual(0);
+    expect(out2[0]!.box![2]).toBeLessThanOrEqual(400);
+  });
+
+  it("unanchored line → text-only (no charBoxes/box/angle)", () => {
+    const r = fuseStructure([], [{ n: 1, text: "日夜奔波", dir: "v" }]);
+    const out = fusedToOcrLines(r);
+    expect(out[0]).toEqual({ text: "日夜奔波", dir: "v" });
   });
 });
 

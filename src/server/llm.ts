@@ -1002,6 +1002,16 @@ export class MockOcrService implements OcrService {
       };
     }
     if (/plant|blank|textless/i.test(name)) return { ok: true, value: { lines: [] } };
+    // uploads named fusion*: structure-fusion contract — anchored line with
+    // per-char boxes + angle, plus an unanchored line (words → loose list)
+    if (/fusion/i.test(name)) {
+      return {
+        ok: true, value: { lines: [
+          { text: "親近自然", angle: 66, dir: "v", charBoxes: [[0, 0, 100, 100], [100, 0, 200, 100], [200, 0, 300, 100], [300, 0, 400, 100]] },
+          { text: "日夜奔波", dir: "v" },
+        ] },
+      };
+    }
     // vertical: uploads named vertical* contain a top-to-bottom column
     if (/vertical/i.test(name)) {
       return { ok: true, value: { lines: [{ text: "親近自然", box: [880, 100, 950, 420], dir: "v" }] } };

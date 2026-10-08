@@ -379,6 +379,29 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     expect(moon?.angle).toBe(27); // diagonal angle flows to the client
   });
 
+  it("fusion lines: per-char boxes become word boxes verbatim; unanchored lines keep words visible", async () => {
+    const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 5, g: 5, b: 5 } } }).png().toBuffer();
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(png)], { type: "image/png" }), "fusion-letter.png");
+    const res = await app.request("/api/ask/ocr", { method: "POST", headers: { "x-dev-user": "dad" }, body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.positioned).toBe(true); // the anchored line positions the page
+    const words = body.lines.flatMap((l: { words: { traditional: string; angle?: number; box?: number[] }[] }) => l.words);
+    const qinjin = words.find((w: { traditional: string }) => w.traditional === "親近");
+    const ziran = words.find((w: { traditional: string }) => w.traditional === "自然");
+    // char-box unions flow through UNCHANGED — no vector distribution, no snap
+    expect(qinjin?.box).toEqual([0, 0, 200, 100]);
+    expect(ziran?.box).toEqual([200, 0, 400, 100]);
+    expect(qinjin?.angle).toBe(66);
+    // unanchored line: words present, boxless — the loose-words list shows them
+    const benbo = words.find((w: { traditional: string }) => w.traditional === "奔波");
+    expect(benbo).toBeTruthy();
+    expect(benbo?.box).toBeUndefined();
+    expect(body.fullText).toContain("日夜奔波");
+  });
+
   it("entries link to their source ask; follow-ups survive history deletion", async () => {
     // save an entry carrying the ask link
     const e = await (

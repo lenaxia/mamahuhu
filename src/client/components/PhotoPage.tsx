@@ -302,12 +302,20 @@ export function PhotoPage({
         pinch / double-tap / + to zoom · tap a word for its meaning
       </div>
 
-      {!page.positioned && (
-        <>
-          <div className="text-xs uppercase tracking-wide text-neutral-400">words (no positions detected)</div>
-          <div className="flex flex-wrap gap-2">
-            {page.lines.flatMap((line, li) =>
-              line.words.map((wd, wi) => {
+      {(() => {
+        // positioned pages may still carry UNANCHORED fusion lines (words
+        // without boxes) — they must stay visible, not silently vanish
+        const loose = page.positioned
+          ? page.lines.flatMap((line, li) => line.words.filter((wd) => !wd.box).map((wd, wi) => ({ wd, li, wi })))
+          : page.lines.flatMap((line, li) => line.words.map((wd, wi) => ({ wd, li, wi })));
+        if (!loose.length && page.positioned) return null;
+        return (
+          <>
+            <div className="text-xs uppercase tracking-wide text-neutral-400">
+              {page.positioned ? "words (no positions detected)" : "words"}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {loose.map(({ wd, li, wi }) => {
                 const isSaved = wd.saved || savedNow.has(wd.traditional);
                 return (
                   <button
@@ -324,12 +332,12 @@ export function PhotoPage({
                     {isSaved && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900" />}
                   </button>
                 );
-              }),
-            )}
-          </div>
-          {ocrWord && <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} askId={askId} />}
-        </>
-      )}
+              })}
+            </div>
+            {ocrWord && !(page.positioned && ocrWord.box) && <HanziWordCard word={ocrWord} onSaved={(t) => setSavedNow((s) => new Set(s).add(t))} askId={askId} />}
+          </>
+        );
+      })()}
     </div>
   );
 }

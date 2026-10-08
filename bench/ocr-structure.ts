@@ -5,37 +5,9 @@
 //               iteration happens here, matcher work only)
 // Run: npx tsx bench/ocr-structure.ts [fixture ...]   (default: all cached)
 import { readFileSync, existsSync } from "node:fs";
-import { fuseStructure, type ClassicalItem, type StructureLine } from "../src/server/ocr-fusion";
+import { fuseStructure, parseStructureLines, type ClassicalItem } from "../src/server/ocr-fusion";
 
 const CACHE = "/tmp/opencode/fusion-cache";
-
-function parseStructureLines(raw: string): StructureLine[] {
-  const s = raw.replace(/```(?:json)?/gi, "").replace(/```/g, "");
-  const start = Math.min(...[s.indexOf("{"), s.indexOf("[")].filter((n) => n >= 0));
-  if (!Number.isFinite(start)) return [];
-  let depth = 0, inStr = false, esc = false;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i]!;
-    if (esc) { esc = false; continue; }
-    if (c === "\\") { esc = true; continue; }
-    if (c === '"') { inStr = !inStr; continue; }
-    if (inStr) continue;
-    if (c === "{" || c === "[") depth++;
-    else if (c === "}" || c === "]") {
-      depth--;
-      if (depth === 0) {
-        try {
-          const p = JSON.parse(s.slice(start, i + 1));
-          const arr: { n?: number; text?: string; dir?: string }[] = Array.isArray(p) ? p : p.lines ?? [];
-          return arr
-            .filter((l) => typeof l.text === "string" && l.text.trim())
-            .map((l, i) => ({ n: l.n ?? i + 1, text: l.text!, dir: l.dir === "v" ? "v" as const : "h" as const }));
-        } catch { return []; }
-      }
-    }
-  }
-  return [];
-}
 
 const names = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const all = names.length ? names : ["letter-4920", "letter-4919", "letter-diagonal", "poster-flat", "grid-handwriting", "banner-insitu", "wordcloud-color", "curve-arc", "curve-s"];

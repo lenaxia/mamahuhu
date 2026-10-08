@@ -81,6 +81,9 @@ export type OcrLine = {
   to?: [number, number];
   /** text axis in degrees (0 = horizontal L→R, 90 = vertical T→B); snapped to axes when near */
   angle?: number;
+  /** structure-fusion contract: per-char pixel boxes (all-or-nothing per line;
+   *  absent for unanchored lines — words then render in the loose-words list) */
+  charBoxes?: ([number, number, number, number] | null)[];
 };
 
 /** Subject identification for textless photos → ranked Mandarin name tags for everything visible. */

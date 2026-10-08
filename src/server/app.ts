@@ -628,8 +628,25 @@ async function buildPhrase(
       // carries the line angle so the overlay renders rotated to the text
       let charCursor = 0;
       const lineAngle = line.angle;
-      let along: undefined | ((s: number, e: number) => [number, number, number, number]);
-      if (line.from && line.to) {
+      // FUSION lines: per-char boxes are ground truth from classical anchors —
+      // no vector distribution, no pitch snap; word box = union of its chars
+      const charBoxAt = line.charBoxes
+        ? (s: number, e: number): [number, number, number, number] | undefined => {
+          const slice = line.charBoxes!.slice(s, e);
+          if (!slice.length || slice.some((b) => !b)) return undefined;
+          const bs = slice as [number, number, number, number][];
+          return [
+            Math.round(Math.min(...bs.map((b) => b[0]))),
+            Math.round(Math.min(...bs.map((b) => b[1]))),
+            Math.round(Math.max(...bs.map((b) => b[2]))),
+            Math.round(Math.max(...bs.map((b) => b[3]))),
+          ];
+        }
+        : undefined;
+      let along: undefined | ((s: number, e: number) => [number, number, number, number] | undefined);
+      if (charBoxAt) {
+        along = charBoxAt; // char-index space
+      } else if (line.from && line.to) {
         const rawLen = Math.hypot(line.to[0]! - line.from[0]!, line.to[1]! - line.from[1]!);
         const ownPitch = rawLen / Math.max(1, totalChars);
         // snap to median within a FACTOR OF 2: the measured failure mode is
@@ -642,15 +659,16 @@ async function buildPhrase(
         const ux = (line.to[0]! - line.from[0]!) / rawLen;
         const uy = (line.to[1]! - line.from[1]!) / rawLen;
         const to: [number, number] = [line.from[0]! + ux * len, line.from[1]! + uy * len];
-        along = (s: number, e: number) => cellAlong(line.from!, to, len, s, e, totalChars);
+        // fraction space → char-index space so both contracts share one closure
+        along = (s: number, e: number) => cellAlong(line.from!, to, len, s / totalChars, e / totalChars, totalChars);
       }
       for (const seg of segments) {
         const hit = lookup(seg);
         const segLen = [...seg].length;
         let box: [number, number, number, number] | undefined;
         if (along) {
-          box = along(charCursor / totalChars, (charCursor + segLen) / totalChars);
-          positioned = true;
+          box = along(charCursor, charCursor + segLen);
+          if (box) positioned = true;
         } else if (line.box) {
           if (dir === "v" && yCursor !== undefined) {
             // vertical column: split the line box along Y by char count
@@ -675,7 +693,7 @@ async function buildPhrase(
         chs.forEach((ch, ci) => {
           let chBox: [number, number, number, number] | undefined;
           if (along) {
-            chBox = along((charCursor + ci) / totalChars, (charCursor + ci + 1) / totalChars);
+            chBox = along(charCursor + ci, charCursor + ci + 1);
           } else if (box) {
             const cw = (box[2] - box[0]) / chs.length;
             chBox = [

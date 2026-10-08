@@ -97,13 +97,24 @@ Boxes on a 0-1000 grid (0,0 = top-left). One region per contiguous text block.`;
 
 const RECOGNIZE_SYSTEM = "Transcribe ALL Chinese text visible in the image, in reading order. Reply with ONLY the transcription — no JSON, no notes.";
 
+// STRUCTURE prompt v2 — validated on the letter fixtures (9 clean lines, correct
+// text, no loops). A/B-matrix rule applies: no edits without bench/ab-letter.ts.
+const STRUCTURE_SYSTEM = `You are an OCR reader. Transcribe every PHYSICAL line or column of Chinese text, one at a time.
+Return ONLY valid JSON: {"lines":[{"n":1,"text":"…","dir":"h"|"v"}]}
+Rules:
+- Each physical line/column = one entry, numbered sequentially (n:1, n:2, ...)
+- "text": ONLY the characters you read, max 20 per line. If a line is longer, split it.
+- If there's a visible gap within a line (space, seal, stamp), insert ⟪N⟫ where N = gap in char-widths.
+- "dir": "h" horizontal, "v" vertical/near-vertical.
+- Read each line EXACTLY ONCE. Count the lines you see — stop when you've transcribed them all.`;
+
 interface Box { x1: number; y1: number; x2: number; y2: number }
 
 export class LadderOcrService implements OcrService {
   constructor(private rapid: RapidOcrService, private llm: OcrService, private chatCfg?: { base: string; key: string; model: string }) {}
   available(): boolean { return this.llm.available(); }
   /** which rung served the last call (diagnostics/tests) */
-  public lastServedBy: "classical" | "llm" = "classical";
+  public lastServedBy: "classical" | "fusion" | "llm" = "classical";
 
   private async chat(system: string, b64: string, maxTokens: number): Promise<string> {
     if (!this.chatCfg) throw new Error("chat cfg missing");
@@ -115,7 +126,7 @@ export class LadderOcrService implements OcrService {
         messages: [
           { role: "system", content: system },
           { role: "user", content: [
-            { type: "text", text: system === CENSUS_SYSTEM ? "List the text regions." : "Transcribe." },
+            { type: "text", text: system === CENSUS_SYSTEM ? "List the text regions." : system === STRUCTURE_SYSTEM ? "Transcribe the Chinese text lines." : "Transcribe." },
             { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
           ] },
         ],
@@ -182,6 +193,25 @@ export class LadderOcrService implements OcrService {
             }
           }
           return { ok: true, value: { lines } };
+        }
+      }
+      // FUSION rung (OCR_FUSION=1): classical boxes + LLM text/structure,
+      // deterministic alignment (src/server/ocr-fusion.ts). Classical must have
+      // produced SOMETHING to anchor against; curves with 0 items go straight
+      // to the vector rung. Serves only when at least one line anchored —
+      // fusion must beat the fallback, never degrade to list layout.
+      if (this.chatCfg && process.env.OCR_FUSION === "1" && items.length > 0) {
+        try {
+          const { fuseStructure, parseStructureLines, fusedToOcrLines } = await import("./ocr-fusion");
+          const raw = await this.chat(STRUCTURE_SYSTEM, Buffer.from(bytes).toString("base64"), 4000);
+          const structure = parseStructureLines(raw);
+          const fused = fusedToOcrLines(fuseStructure(items, structure));
+          if (fused.some((l) => l.charBoxes)) {
+            this.lastServedBy = "fusion";
+            return { ok: true, value: { lines: fused } };
+          }
+        } catch {
+          /* fusion is best-effort — vector rung stands behind it */
         }
       }
     } catch {

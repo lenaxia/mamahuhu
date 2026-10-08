@@ -72,6 +72,37 @@ export function parseStructureTokens(text: string): Token[] {
 /** variant/whitespace normalization: both OCR sides compared through this */
 const cleanNorm = (s: string) => toTraditional(s.replace(/\s+/g, ""));
 
+/** parse the structure-LLM raw response → StructureLine[] (balanced-bracket JSON,
+ *  tolerant of fences/bare arrays; gap-only or empty-text lines dropped). */
+export function parseStructureLines(raw: string): StructureLine[] {
+  const s = raw.replace(/```(?:json)?/gi, "").replace(/```/g, "");
+  const starts = [s.indexOf("{"), s.indexOf("[")].filter((n) => n >= 0);
+  if (!starts.length) return [];
+  const start = Math.min(...starts);
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]!;
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0) {
+        try {
+          const p: unknown = JSON.parse(s.slice(start, i + 1));
+          const arr = (Array.isArray(p) ? p : (p as { lines?: unknown[] }).lines ?? []) as { n?: number; text?: unknown; dir?: unknown }[];
+          return arr
+            .filter((l) => typeof l.text === "string" && l.text.replace(/⟪[^⟫]*⟫/gu, "").trim())
+            .map((l, i) => ({ n: typeof l.n === "number" ? l.n : i + 1, text: l.text as string, dir: l.dir === "v" ? "v" as const : "h" as const }));
+        } catch { return []; }
+      }
+    }
+  }
+  return [];
+}
+
 // ---------- local alignment ----------
 // Smith-Waterman-style: best aligned chunk with FREE ENDS ON BOTH SIDES.
 // Classical fragments span LLM line slices (the ≤20-char prompt cap) and
@@ -413,4 +444,25 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[])
     lines: outLines,
     unmatchedFragments: frags.filter((f) => f.chars.length > 0 && !used.has(f.idx)).map((f) => ({ idx: f.idx, text: items[f.idx]!.text, box: f.box })),
   };
+}
+
+/** fusion result → the app's OcrLine contract (ports.ts). Anchored lines carry
+ *  per-char boxes + a geometric angle/dir; unanchored lines are text-only and
+ *  the client renders their words in the loose-words list. */
+export function fusedToOcrLines(res: FusionResult): import("./ports").OcrLine[] {
+  return res.lines.map((l) => {
+    const boxes = l.chars.map((c) => c.box ?? null);
+    const anchored = boxes.length > 0 && boxes.every((b) => b !== null);
+    if (!anchored) return { text: l.text, dir: l.dir };
+    const bs = boxes as [number, number, number, number][];
+    const box: [number, number, number, number] = [
+      Math.round(Math.min(...bs.map((b) => b[0]))),
+      Math.round(Math.min(...bs.map((b) => b[1]))),
+      Math.round(Math.max(...bs.map((b) => b[2]))),
+      Math.round(Math.max(...bs.map((b) => b[3]))),
+    ];
+    // dir from GEOMETRY (the measured curve-s case: LLM dir labels are noisy)
+    const dir = l.angle !== null && Math.abs(l.angle) > 45 ? "v" : "h";
+    return { text: l.text, box, dir, angle: l.angle ?? undefined, charBoxes: bs };
+  });
 }
