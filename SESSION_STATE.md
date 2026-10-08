@@ -1,7 +1,7 @@
 # mamahuhu session state — Oct 8, 2026
 
 ## Current deployment state
-- **mamahuhu v0.5.2** in production (mamahuhu tag v0.5.2 + talos-ops-prod PR #2664, merged; release workflow green incl. bundle-boot smoke)
+- **mamahuhu v0.6.1** in production (tags v0.6.0 PR #2665 + v0.6.1 PR #2666, merged; OCR_FUSION=1 enabled)
   - v0.5.2 = factor-of-2 pitch snap (letter-4920 bimodal vectors) + angle-coherence demotion (singles are dictionary segmentation, not overlay quality)
   - NOTE: /healthz is Authelia-gated from this sandbox (302) — version verify needs owner eyeball or an authed curl
 - **mamahuhu-ocr** container deployed (PR #2660 + #2663 headless-opencv fix)
@@ -11,18 +11,17 @@
 - Bundle-boot smoke gate in release workflow (catches non-booting builds)
 - wordcloud-black bench gate: dupes 0→40 (stale gate predating truncation-salvage; genuine word-cloud 2× repeats are not the 11× loop signature)
 
-## Structure fusion (post-0.5.2, targeting 0.6.0) — matcher BUILT, matrix RUN
-`src/server/ocr-fusion.ts` (pure module, unit-tested 22 cases, NOT yet wired into app.ts):
-- Local alignment (Smith-Waterman, variant/punct-tolerant via toTraditional) seeds fragment↔line windows
-- Exact-contiguous scan yields MULTIPLE windows → repeats resolve spatially, no dedup
-- Fragments may span LLM line slices (≤20-char prompt cap): head/tail anchor different lines via disjoint sub-ranges
-- Order-preserving chain DP per line; contested ranges reassigned spatially with textual-strength guard + victim re-chain
-- Piecewise interpolation between anchors (curves bend); LOCAL pitch (no global snap); LLM dir ignored when anchors contradict it
-Matrix (anchored/total chars): poster 224/226 · banner 169/210 · wordcloud-color 78/115 · letter-4919 61/87 · letter-diagonal 31/82 · letter-4920 24/83 (classical-coverage-bound: only 38 chars locally) · grid 0/23 HONEST (classical rows are hallucinated) · curves 0 (classical empty → LLM fallback unchanged)
-Prior POC for comparison: letter 8/83, poster 12/130, grid 3/23 (wrong anchors).
-Bench: `npx tsx bench/ocr-structure.ts [fixtures]`; data cache /tmp/opencode/fusion-cache (classical deterministic 3× identical at any max_side; LLM structure deterministic at temp 0)
-FUSION_DEBUG=1 prints candidate sets per line.
-Open for 0.6.0 wiring: geometry for unanchored lines (vector-rung call vs census-region anchors), wordcloud behavior (LLM "lines" are invented rows — clouds likely keep the vector rung), grid = structural disagreement (classical rows vs LLM columns).
+## Structure fusion — SHIPPED 0.6.0 + 0.6.1 (OCR_FUSION=1 in prod)
+Ladder: classical → gate → **fusion rung** (classical boxes × one structure-LLM call × deterministic alignment) → vector rung fallback.
+Serves only when ≥20% of chars anchor (≥6); 0 classical items (curves) skip straight to vector.
+- Matcher: local alignment seeds (variant/punct-tolerant) → order-preserving chain DP → piecewise geometry; fragments may span LLM line slices; repeats resolve spatially (no dedup)
+- Single-anchor axis from the fragment's OWN box (chars-per-extent orientation + lean-strip model hypot≈m·g+g·√2) — fixed the straight-down-center-x bug (IoU 0.05→0.93); page evidence (≥2-fragment lines, tight median) overrides
+- LAYOUT INFERENCE: lines classical missed entirely get positions from page axis/pitch + LLM line NUMBERING (cross-axis order) — owner photo went 1/9 lines overlaid → 91/91 words boxed; chars stay anchored:false, line flagged inferred
+- Unanchored-still (no anchors anywhere) render in the client's loose-words list (copy: "words (without positions)")
+- Census crops split on newlines + tiled across the crop box (76-char monster lines measured)
+Matrix (anchored chars): poster 224/226 · banner 169/210 · letter-4919 61/87 · wordcloud-color 78/115 · diagonal 31/82 · 4920 24/83 (classical-coverage-bound: 38 chars locally) · grid 0/23 honest · curves vector-fallback
+Bench: ocr-structure.ts (matrix; cache /tmp/opencode/fusion-cache; FUSION_DEBUG=1 candidates) · ocr-iou.mts (STABLE geometry ground truth; LOW flags on sub-range anchors are metric artifacts) · overlay-qa.mts (vision judge — NOISY, measured verdict flips on identical boxes; systematic-failure finder only, NEVER a gate)
+Known: letters' anchoring ceiling = classical coverage (~30% of chars on 4920 locally; prod OpenVINO mamahuhu-ocr may read more — untestable from sandbox); banner/poster IoU low from multi-row grouped detector boxes (pitch=w/m tight cells) — academic, both pass the classical gate and never reach fusion in prod.
 
 ## Key architectural decisions (locked)
 1. Ladder: classical (RapidOCR) → confidence gate → LLM fallback
