@@ -21,9 +21,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
-      - run: npm run build
       - run: scripts/smoke-bundle.sh
 
   docker:
