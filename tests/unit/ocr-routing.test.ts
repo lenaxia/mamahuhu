@@ -41,6 +41,9 @@ const BASELINE: Record<string, Expectation> = {
   // missing columns — the fragment inventory must return every column exactly once
   "letter-4921-prodvar": { serves: true, boxed: 0.9, anchored: 0.7, minLines: 12, contains: ["者手中卑職深知此事干", "望太傅"] },
   "letter-4921-mergedvar": { serves: true, boxed: 0.9, anchored: 0.7, minLines: 12, contains: ["者手中卑職深知此事干", "望太傅"] },
+    // prod-0.8.0 owner paste: OpenVINO double-reads (密呈 region re-read, column tail
+  // re-read) — geometric+textual dedup must collapse each to ONE line
+  "letter-4921-doubleread": { serves: true, boxed: 0.9, anchored: 0.7, minLines: 12, contains: ["者手中卑職深知此事干"] },
   "letter-diagonal": { serves: true, boxed: 0.9, anchored: 0.5, minLines: 5, contains: ["密呈太傅大人的"] },
   // KNOWN: classical's grid text is CTC-hallucinated (合個英與); the LLM's
   // column reading can't cover it ≥90% so classical text stands — same as the

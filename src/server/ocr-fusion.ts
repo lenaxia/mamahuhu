@@ -205,9 +205,28 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   });
 
   // INVENTORY: fragments with ≥2 chars or a Han char (drops M / + / 1 noise;
-  // keeps latin words — real content), reading-ordered
-  const keep = items.map((it, idx) => ({ idx, it, m: [...it.text].length }))
+  // keeps latin words — real content), then GEOMETRIC DOUBLE-READ DEDUP —
+  // the detector emits overlapping re-reads of one region (prod OpenVINO:
+  // 密呈…钓庄 AND 密呈…钧座 as separate fragments; a column plus its tail
+  // re-read). Overlap ≥60% of the smaller box = same region → keep the longer
+  // reading (then higher score). Position-based: same text at DIFFERENT
+  // positions always survives (the 11× genuine-repeat rule).
+  const area = (b: [number, number, number, number]) => Math.max(1, (b[2] - b[0]) * (b[3] - b[1]));
+  const overlapFrac = (a: [number, number, number, number], b: [number, number, number, number]) => {
+    const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+    const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+    return (ix * iy) / Math.min(area(a), area(b));
+  };
+  const candidates = items.map((it, idx) => ({ idx, it, m: [...it.text].length }))
     .filter((f) => f.m >= 2 || /\p{Script=Han}/u.test(f.it.text));
+  const keep: typeof candidates = [];
+  for (const f of candidates) {
+    // geometry ALONE cannot dedup: adjacent diagonal columns' AABBs overlap
+    // up to 0.78 (measured). Double-reads are same-region AND same-content.
+    const dupOf = keep.find((k) => overlapFrac(k.it.box, f.it.box) >= 0.6 && textSimilar(k.it.text, f.it.text) >= 0.5);
+    if (!dupOf) { keep.push(f); continue; }
+    if (f.m > dupOf.m || (f.m === dupOf.m && f.it.score > dupOf.it.score)) keep[keep.indexOf(dupOf)] = f;
+  }
   const tall = (f: { it: ClassicalItem }) => (f.it.box[3] - f.it.box[1]) > (f.it.box[2] - f.it.box[0]) * 1.3;
   const bandSort = <T extends { it: ClassicalItem }>(fs: T[], axis: "y" | "x", reverse: boolean): T[] => {
     if (fs.length < 2) return fs;
