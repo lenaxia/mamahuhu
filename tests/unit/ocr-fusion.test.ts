@@ -107,14 +107,19 @@ describe("LLM-only columns (classical missed them)", () => {
     expect(x).toBeLessThan(740); // between the two fragment columns
   });
 
-  it("more LLM-only lines than free slots: extras drop (bounded by the lattice)", () => {
+  it("distinct LLM-only columns all get slots (supply scales to demand, image-clamped)", () => {
     const r = fuseStructure(
       [item("甲乙", [760, 100, 840, 300])],
       [line(1, "甲乙", "v"), line(2, "子丑", "v"), line(3, "寅卯", "v"), line(4, "辰巳", "v"), line(5, "午未", "v")],
+      { w: 1000, h: 1000 },
     );
     const inferred = r.lines.filter((l) => l.inferred);
-    expect(inferred.length).toBeLessThanOrEqual(2); // left edge + right edge only
-    expect(r.droppedLines.length).toBeGreaterThanOrEqual(2);
+    expect(inferred.length).toBe(4); // every distinct column serves
+    for (const l of inferred) {
+      const b = l.chars[0]!.box!;
+      expect(b[0]).toBeGreaterThan(-60); // clamped to image bounds
+      expect(b[2]).toBeLessThan(1100);
+    }
   });
 
   it("no fragments at all → no inference (vector rung's job)", () => {

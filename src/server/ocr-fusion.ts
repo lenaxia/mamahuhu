@@ -295,11 +295,14 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   // (cross-axis spacing ≥1.8× the column gap, plus the outer edges), in the
   // LLM's reading order; more variants than free slots = duplicate readings,
   // dropped. Genuine repeats always have their own fragments or slots.
+  // covered = the line would be (or was) ACCEPTED as an improvement reading of
+  // some fragment — the SAME standard (≥0.9 span or ≥0.55 matched). A looser
+  // test ate real columns: 明望太傅大人 was "covered" by the 密呈 fragment on
+  // shared 太傅大人 (4 chars) and dropped, its content nowhere in the output.
   const coveredByInventory = (ln: { normChars: string[] }) => {
     for (const f of keep) {
       const fChars = [...cleanNorm(f.it.text)];
-      const w = localAlign(fChars, ln.normChars);
-      if (w && (w.matched >= 0.5 * fChars.length || w.matched >= 0.5 * ln.normChars.length)) return true;
+      if (accept(localAlign(fChars, ln.normChars), fChars.length)) return true;
     }
     return false;
   };
@@ -333,7 +336,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
     for (let i = 1; i < crosses.length; i++) {
       if (crosses[i]! - crosses[i - 1]! >= freeThreshold) slots.push((crosses[i]! + crosses[i - 1]!) / 2);
     }
-    slots.push(crosses[0]! - colGap); // ONE outer slot: the not-yet-read edge
+
     slots.sort((a, b) => (verticalPage ? b - a : a - b)); // reading order
     // column start (along axis) from the fragment lines' first-char medians
     const alongOf = (p: [number, number]) => p[0] * ax + p[1] * ay;
@@ -353,6 +356,15 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       if (g) { g.lines.push(ln); groupDrops.push(ln); } else groups.push({ lines: [ln] });
     }
     for (const d of groupDrops) dropped.push({ n: d.n, text: d.cleanChars.join("") });
+    // slot supply scales to demand: interior free gaps first, then outer
+    // columns stepping by colGap past the last-read edge (a letter's columns
+    // continue past classical's coverage), clamped by image bounds. The old
+    // ONE-outer-slot cap starved real columns (owner-measured: 6 LLM-only
+    // columns, 4 slots, 3 dropped).
+    const verticalPage2 = medAngle > 45 || medAngle < -45;
+    const lastCross = verticalPage2 ? crosses[0]! : crosses[crosses.length - 1]!;
+    const dir = verticalPage2 ? -1 : 1; // reading advances toward the far edge
+    for (let i = 1; i <= groups.length; i++) slots.push(lastCross + dir * colGap * i);
     for (const ln of groups.map((g) => g.lines[0]!)) {
       const slot = slots.find((s) => !taken.some((t) => Math.abs(t - s) < 0.9 * pitch));
       if (slot === undefined) { dropped.push({ n: ln.n, text: ln.cleanChars.join("") }); continue; }
