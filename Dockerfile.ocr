@@ -1,6 +1,10 @@
 FROM python:3.12-slim
 WORKDIR /srv
-RUN pip install --no-cache-dir rapidocr-onnxruntime==1.4.4 fastapi uvicorn pillow
+# rapidocr pulls full opencv-python, which needs libxcb/libgl at runtime on
+# slim images (the crashloop: libxcb.so.1 not found). Force the headless build.
+RUN pip install --no-cache-dir fastapi uvicorn pillow rapidocr-onnxruntime==1.4.4 && \
+    pip uninstall -y opencv-python && \
+    pip install --no-cache-dir opencv-python-headless
 COPY ocr_server.py .
 ENV PORT=8000
 EXPOSE 8000
