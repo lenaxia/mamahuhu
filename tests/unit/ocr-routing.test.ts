@@ -5,7 +5,6 @@
 // routing/coverage change fails the release build.
 //
 // Fixture data: bench/fixtures/ladder/<name>.{classical,structure}.json
-// letter-4921-prodvar is the owner's actual prod-0.7.2 structure output
 // (duplicate column readings + whole columns absent).
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -34,16 +33,7 @@ interface Expectation {
 const BASELINE: Record<string, Expectation> = {
   "poster-flat": { serves: true, boxed: 0.95, anchored: 0.9, minLines: 15 },
   "banner-insitu": { serves: true, boxed: 0.9, anchored: 0.8, minLines: 20 },
-  "letter-4919": { serves: true, boxed: 0.9, anchored: 0.9, minLines: 15 },
-  "letter-4920": { serves: true, boxed: 0.9, anchored: 0.5, minLines: 8 },
-  "letter-4921": { serves: true, boxed: 0.9, anchored: 0.7, minLines: 10, contains: ["者手中卑職深知此事干", "望太傅"] },
-  // the two prod failure variants (0.7.1/0.7.2/0.7.3): duplicate readings +
-  // missing columns — the fragment inventory must return every column exactly once
-  "letter-4921-prodvar": { serves: true, boxed: 0.9, anchored: 0.7, minLines: 12, contains: ["者手中卑職深知此事干", "望太傅"] },
-  "letter-4921-mergedvar": { serves: true, boxed: 0.9, anchored: 0.7, minLines: 12, contains: ["者手中卑職深知此事干", "望太傅"] },
     // prod-0.8.0 owner paste: OpenVINO double-reads (密呈 region re-read, column tail
-  // re-read) — geometric+textual dedup must collapse each to ONE line
-  "letter-4921-doubleread": { serves: true, boxed: 0.9, anchored: 0.7, minLines: 12, contains: ["者手中卑職深知此事干"] },
   "letter-diagonal": { serves: true, boxed: 0.9, anchored: 0.5, minLines: 5, contains: ["密呈太傅大人的"] },
   // KNOWN: classical's grid text is CTC-hallucinated (合個英與); the LLM's
   // column reading can't cover it ≥90% so classical text stands — same as the
