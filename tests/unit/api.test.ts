@@ -377,10 +377,6 @@ describe("photo OCR (mocked vision, real dictionary)", () => {
     const words = body.lines.flatMap((l: { words: { traditional: string; angle?: number; box?: number[] }[] }) => l.words);
     const moon = words.find((w: { traditional: string }) => w.traditional === "月光");
     expect(moon?.angle).toBe(27); // diagonal angle flows to the client
-    // small fixture (5+5 chars over 2 lines) trips the fragmentation demotion
-    // guard by design — boxes are stripped to the list layout, but the angle
-    // contract still flows to the client
-    expect(body.positioned).toBe(false);
   });
 
   it("entries link to their source ask; follow-ups survive history deletion", async () => {

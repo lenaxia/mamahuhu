@@ -608,9 +608,8 @@ async function buildPhrase(
       // 60° cell halves its width and shrink-to-fit crushes the font
       return [Math.round(cx - half), Math.round(cy - half), Math.round(cx + half), Math.round(cy + half)];
     };
-    // median char pitch across vector lines — handwriting has uniform glyph
-    // size; lines whose own pitch is within 30% of the median snap to it, so
-    // chips render one consistent size (genuine outliers like word clouds keep theirs)
+    // median char pitch across vector lines — uniform-glyph text (handwriting,
+    // letters) snaps lines to it; see the FACTOR OF 2 note below for the band
     const vecPitches = res.value.lines
       .filter((l) => l.from && l.to)
       .map((l) => Math.hypot(l.to![0]! - l.from![0]!, l.to![1]! - l.from![1]!) / Math.max(1, [...l.text].length))
@@ -633,8 +632,11 @@ async function buildPhrase(
       if (line.from && line.to) {
         const rawLen = Math.hypot(line.to[0]! - line.from[0]!, line.to[1]! - line.from[1]!);
         const ownPitch = rawLen / Math.max(1, totalChars);
-        // snap to median when close: uniform glyphs AND extends undershot vectors
-        const len = medianPitch > 0 && Math.abs(ownPitch - medianPitch) / medianPitch <= 0.3
+        // snap to median within a FACTOR OF 2: the measured failure mode is
+        // bimodal vectors (half the columns at exactly 2x the true extent —
+        // letter-4920: 61px vs 122px cells on uniform ~60px glyphs). Genuine
+        // mixed-size text (word clouds) varies by more than 2x and stays.
+        const len = medianPitch > 0 && ownPitch >= medianPitch * 0.45 && ownPitch <= medianPitch * 2.2
           ? medianPitch * totalChars
           : rawLen;
         const ux = (line.to[0]! - line.from[0]!) / rawLen;
@@ -697,12 +699,22 @@ async function buildPhrase(
     {
       const allWords = lines.flatMap((l: { words: z.infer<typeof OcrWordSchema>[] }) => l.words);
       if (allWords.length >= 6) {
-        const singles = allWords.filter((w) => [...w.traditional].length === 1).length / allWords.length;
-        const lineLens = lines.map((l: { words: z.infer<typeof OcrWordSchema>[] }) => l.words.reduce((s: number, w: z.infer<typeof OcrWordSchema>) => s + [...w.traditional].length, 0)).sort((a: number, b: number) => a - b);
-        const medianLine = lineLens[Math.floor(lineLens.length / 2)] ?? 0;
-        // fragmented BOTH ways measured: mostly single-char words OR no line
-        // longer than 3 chars → geometry cannot be trusted, chips would mislead
-        if (singles > 0.6 || medianLine <= 2) {
+        // demote only on GEOMETRY incoherence, never on word length — singles
+        // are a dictionary limitation (period vocabulary), not an overlay
+        // quality problem (letter-4920: 72% singles but angles 51-68° = tight
+        // cluster = well-placed rotated chips). Scatter = model guessing.
+        const angles = allWords.filter((w) => w.angle !== undefined).map((w) => w.angle!);
+        const boxes = allWords.filter((w) => w.box !== undefined);
+        if (angles.length >= 6) {
+          const am = angles.reduce((s: number, a: number) => s + a, 0) / angles.length;
+          const asd = Math.sqrt(angles.reduce((s: number, a: number) => s + (a - am) ** 2, 0) / angles.length);
+          if (asd > 25) {
+            // wildly scattered angles → the model is guessing direction
+            for (const l of lines) for (const w of l.words) w.box = undefined;
+            positioned = false;
+          }
+        } else if (boxes.length > 0 && boxes.length / allWords.length > 0.5 && angles.length < 3) {
+          // no angle data at all (classical axis boxes on non-axis text)
           for (const l of lines) for (const w of l.words) w.box = undefined;
           positioned = false;
         }

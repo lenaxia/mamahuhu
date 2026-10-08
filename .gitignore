@@ -12,3 +12,4 @@ vendor/canto/
 
 # opencode session state — local only
 .local/
+__pycache__
