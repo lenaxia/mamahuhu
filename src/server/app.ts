@@ -307,6 +307,13 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
       { base, key, model: visionModel },
     );
   }
+  // OCR_PIPELINE=2: pipeline v2 — det quads (measured) → rectify → per-crop reads
+  // (det-empty or det-down → the wrapped service above as fallback)
+  if (!mock && process.env.OCR_PIPELINE === "2") {
+    const { PipelineOcrService } = await import("./ocr-pipeline");
+    const detUrl = process.env.OCR_DET_URL ?? "http://mamahuhu-ocr.home.svc.cluster.local:8000/det";
+    ocr = new PipelineOcrService({ detUrl, base, key, model: visionModel, fallback: ocr });
+  }
   const describe: DescribeService = mock
     ? new MockDescribeService()
     : new GatewayDescribeService({ base, key, model: visionModel });

@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
@@ -154,5 +155,79 @@ describe("pipeline v2 structure regression (committed det fixtures, offline)", (
       const n = expectChars(q);
       expect(charCells(q, n)).toHaveLength(n);
     }
+  });
+});
+
+describe("axis canonicalization (det corner-order robustness)", () => {
+  it("axisAngle: reversed corner order (170° edge) canonicalizes to the same axis as 0°", async () => {
+    const { axisAngle } = await import("../../src/server/ocr-geometry");
+    const fwd = quadAt(0, 200, 20);
+    const rev: Quad = { pts: [...fwd.pts].reverse() }; // same quad, corners reversed → edge reads ~180°
+    expect(axisAngle(fwd)).toBeCloseTo(0, 5);
+    expect(axisAngle(rev)).toBeCloseTo(0, 5);
+    const col = quadAt(70, 200, 20);
+    const colRev: Quad = { pts: [...col.pts].reverse() };
+    expect(axisAngle(col)).toBeCloseTo(axisAngle(colRev), 5);
+    expect(Math.abs(axisAngle(col))).toBeGreaterThan(45); // vertical stays vertical
+  });
+
+  it("charCells run in reading direction regardless of corner order", async () => {
+    const fwd = quadAt(0, 300, 60, [100, 100]);
+    const rev: Quad = { pts: [...fwd.pts].reverse() };
+    const cf = charCells(fwd, 3), cr = charCells(rev, 3);
+    expect(cf[0]![0]).toBeLessThan(cf[2]![0]); // left→right
+    expect(cr[0]![0]).toBeLessThan(cr[2]![0]); // reversed corners too
+  });
+});
+
+describe("cropPlan (sharp rotation mapping — measured behavior)", () => {
+  it("plan.map predicts where sharp actually moves a marked point (real sharp, raw buffers)", async () => {
+    const { cropPlan } = await import("../../src/server/ocr-pipeline");
+    const W = 400, H = 300, angle = 30;
+    const plan = cropPlan(W, H, angle);
+    // red dot at (300,50) on a raw image
+    const base = Buffer.alloc(W * H * 3, 255);
+    const put = (x: number, y: number) => {
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const i = ((y + dy) * W + (x + dx)) * 3;
+        base[i] = 255; base[i + 1]! = 0; base[i + 2]! = 0;
+      }
+    };
+    put(300, 50);
+    const rot = await sharp(base, { raw: { width: W, height: H, channels: 3 } })
+      .rotate(plan.rotateArg, { background: { r: 255, g: 255, b: 255 } })
+      .extend({ top: plan.D, left: plan.D, bottom: plan.D, right: plan.D, background: { r: 255, g: 255, b: 255 } })
+      .raw().toBuffer({ resolveWithObject: true });
+    let found: [number, number] | null = null;
+    for (let y = 0; y < rot.info.height && !found; y++)
+      for (let x = 0; x < rot.info.width; x++) {
+        const i = (y * rot.info.width + x) * rot.info.channels;
+        if (rot.data[i]! > 200 && rot.data[i + 1]! < 100 && rot.data[i + 2]! < 100) { found = [x, y]; break; }
+      }
+    expect(found).not.toBeNull();
+    const pred = plan.map([300, 50]);
+    expect(Math.abs(pred[0] - found![0])).toBeLessThanOrEqual(3);
+    expect(Math.abs(pred[1] - found![1])).toBeLessThanOrEqual(3);
+  });
+});
+
+
+describe("splitQuad + charSim (evidence-driven multi-line handling)", () => {
+  it("splitQuad: 2 strips of half thickness, same length and angle", async () => {
+    const { splitQuad } = await import("../../src/server/ocr-geometry");
+    const q = quadAt(0, 300, 60, [100, 100]);
+    const [a, b] = splitQuad(q, 2) as [Quad, Quad];
+    const fa = frameBox(a, 0), fb = frameBox(b, 0);
+    expect(fa[2] - fa[0]).toBeCloseTo(300, 0);
+    expect(fa[3] - fa[1]).toBeCloseTo(30, 0);
+    expect(fb[3] - fb[1]).toBeCloseTo(30, 0);
+    expect(fa[1]).toBeLessThan(fb[1]); // first strip on top
+  });
+
+  it("charSim: duplicate paragraphs match, distinct content does not", async () => {
+    const { charSim } = await import("../../src/server/ocr-geometry");
+    const t = "長期舉辦KidsFleaMarket培養孩子的環保意識";
+    expect(charSim(t, [...t].reverse().join(""))).toBe(1);
+    expect(charSim(t, "密呈太傅大人的鈞座")).toBeLessThan(0.4);
   });
 });

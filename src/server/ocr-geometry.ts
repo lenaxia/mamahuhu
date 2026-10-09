@@ -29,6 +29,24 @@ export function quadAngle(q: Quad): number {
   return (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
 }
 
+/**
+ * Canonical text-axis angle in [-90, 90) with READING-direction orientation:
+ * near-horizontal axes point left→right (dx > 0), near-vertical top→bottom
+ * (dy > 0). Det quads arrive with arbitrary corner order (a row can read as
+ * ~170° = same axis flipped) — rotations and cell orderings must be canonical
+ * or crops come out upside-down and chars map to mirrored cells.
+ */
+export function axisAngle(q: Quad): number {
+  let a = quadAngle(q);
+  a = ((((a + 90) % 180) + 180) % 180) - 90; // axis → [-90, 90)
+  const bi = longestEdge(q);
+  const p0 = q.pts[bi]!, p1 = q.pts[(bi + 1) % 4]!;
+  const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+  if (Math.abs(a) < 45 ? dx < 0 : dy < 0) a += a < 0 ? 180 : -180; // canonical reading direction
+  // re-canonicalize into [-90, 90)
+  return ((((a + 90) % 180) + 180) % 180) - 90;
+}
+
 function edgeLengths(q: Quad): number[] {
   return q.pts.map((p, i) => {
     const b = q.pts[(i + 1) % 4]!;
@@ -119,8 +137,13 @@ export function expectChars(q: Quad): number {
 export function charCells(q: Quad, n: number): Box[] {
   const bi = longestEdge(q);
   const mid = (a: Pt, b: Pt): Pt => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-  const start = mid(q.pts[(bi + 3) % 4]!, q.pts[bi]!);
-  const end = mid(q.pts[(bi + 1) % 4]!, q.pts[(bi + 2) % 4]!);
+  let start = mid(q.pts[(bi + 3) % 4]!, q.pts[bi]!);
+  let end = mid(q.pts[(bi + 1) % 4]!, q.pts[(bi + 2) % 4]!);
+  // canonical reading direction: cells run left→right (near-horizontal) / top→bottom (near-vertical)
+  const ang = axisAngle(q);
+  if (Math.abs(ang) < 45 ? end[0] < start[0] : end[1] < start[1]) {
+    const t = start; start = end; end = t;
+  }
   const len = Math.hypot(end[0] - start[0], end[1] - start[1]);
   if (len < 1 || n < 1) return [];
   const u: Pt = [(end[0] - start[0]) / len, (end[1] - start[1]) / len];
@@ -138,4 +161,34 @@ export function charCells(q: Quad, n: number): Box[] {
 /** post-read geometry validation: flag reads deviating >max(3, 40%) from measured chars */
 export function validateRead(len: number, expected: number): boolean {
   return Math.abs(len - expected) > Math.max(3, expected * 0.4);
+}
+
+/**
+ * Split one quad into k equal strips perpendicular to its text axis. Used
+ * AFTER a crop read returns k lines (newlines in the text) — the READ confirms
+ * the geometry, never the reverse (thickness alone can't distinguish a merged
+ * pair of rows from a large-font title).
+ */
+export function splitQuad<T extends Quad>(q: T, k: number): Quad[] {
+  if (k < 2) return [q];
+  const bi = longestEdge(q);
+  const P = q.pts;
+  const e1a = P[bi]!, e1b = P[(bi + 1) % 4]!, e2a = P[(bi + 2) % 4]!, e2b = P[(bi + 3) % 4]!;
+  const out: Quad[] = [];
+  for (let j = 0; j < k; j++) {
+    const f0 = j / k, f1 = (j + 1) / k;
+    const lerp = (a2: Pt, b2: Pt, f: number): Pt => [a2[0] + (b2[0] - a2[0]) * f, a2[1] + (b2[1] - a2[1]) * f];
+    out.push({ pts: [lerp(e1a, e2a, f0), lerp(e1b, e2b, f0), lerp(e1b, e2b, f1), lerp(e1a, e2a, f1)] });
+  }
+  return out;
+}
+
+/** character-multiset similarity (0-1) — duplicate-line detection */
+export function charSim(a: string, b: string): number {
+  const count = (t: string) => { const m: Record<string, number> = {}; for (const c of t) m[c] = (m[c] ?? 0) + 1; return m; };
+  const ca = count(a), cb = count(b);
+  let hit = 0, la = 0, lb = 0;
+  for (const c in ca) { la += ca[c]!; hit += Math.min(ca[c]!, cb[c] ?? 0); }
+  for (const c in cb) lb += cb[c]!;
+  return hit / Math.max(1, Math.min(la, lb));
 }
