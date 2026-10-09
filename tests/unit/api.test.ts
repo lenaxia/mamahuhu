@@ -225,14 +225,25 @@ describe("hanzi input", () => {
     expect(words[2]!.english.toLowerCase()).toContain("sleep");
   });
 
-  it("marks unknown segments", async () => {
+  it("rare characters resolve via Unihan; truly-unlisted chars still mark unknown", async () => {
+    // Unihan layer: 𪚥 (zhé) previously unknown — now answerable
     const res = await app.request("/api/ask/hanzi", {
       method: "POST",
       headers: H,
       body: JSON.stringify({ text: "我要𪚥" }),
     });
     const body = await res.json();
-    expect(body.words.at(-1)?.known).toBe(false);
+    const last = body.words.at(-1);
+    expect(last?.known).toBe(true);
+    expect(last?.pinyin?.toLowerCase()).toContain("zh"); // rendered with tone marks (zhé)
+    // 𠮷 has no CEDICT or Unihan single-char entry — unknown pathway intact
+    const res2 = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "我要𠮷" }),
+    });
+    const body2 = await res2.json();
+    expect(body2.words.at(-1)?.known).toBe(false);
   });
 });
 

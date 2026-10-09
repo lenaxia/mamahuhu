@@ -298,3 +298,15 @@ describe("dense-row survival + fragment merge + column gap-fill", () => {
     expect(filled.length).toBe(9);
   });
 });
+
+describe("tier 3: LLM definition validation (pure)", () => {
+  it("accepts a correct definition; syllable count must match", async () => {
+    const { validateDefinition } = await import("../../src/server/dict");
+    const ok = validateDefinition("太傅", { traditional: "太傅", simplified: "太傅", pinyin: "tai4 fu4", english: "Grand Tutor" });
+    expect(ok?.english).toBe("Grand Tutor");
+    expect(validateDefinition("太傅", { traditional: "太傅", simplified: "太傅", pinyin: "tai4", english: "Grand Tutor" })).toBeNull();
+    expect(validateDefinition("太傅", { traditional: "太師", simplified: "太师", pinyin: "tai4 fu4", english: "Grand Tutor" })).toBeNull();
+    expect(validateDefinition("太傅", { traditional: "太傅", simplified: "太傅", pinyin: "tai4 fu4", english: "x" })).toBeNull();
+    expect(validateDefinition("卑職", { traditional: "卑職", simplified: "卑职", pinyin: "bei1 zhi2", english: "your humble servant" })).not.toBeNull();
+  });
+});

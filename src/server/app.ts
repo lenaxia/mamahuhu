@@ -62,6 +62,7 @@ import {
   UnavailableTts,
 } from "./llm";
 import { candidates, interpret, normalizePinyinInput, renderWord, segmentHanzi } from "../shared/fuzzy";
+import { makeDefiner } from "./dict";
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
 import { parseImageDims } from "./imageinfo";
 import { toTraditional } from "../shared/cedict";
@@ -327,6 +328,8 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
     : new LlmFollowUpService({ base, key, model: chatModel });
 
   const deps: AppDeps = { sql, dictionary, translations, tts, stt, ocr, describe, tagger, followUp, sources: new Set() };
+  // tier 3: LLM-define unknown words on miss (cached permanently, marked)
+  const defineWord = makeDefiner({ base, key, model: fastModel }, sql, dictionary);
 
 /** whole-utterance card for multi-word hanzi input: per-word pinyin + LLM phrase gloss */
 async function buildPhrase(
@@ -622,6 +625,18 @@ async function buildPhrase(
       .filter((l) => l.from && l.to)
       .map((l) => Math.hypot(l.to![0]! - l.from![0]!, l.to![1]! - l.from![1]!) / Math.max(1, [...l.text].length))
       .sort((a, b) => a - b);
+    // dictionary-miss pre-pass: define up to 3 unknown multi-char words per
+    // photo (segmentation was right; the dictionary lacked the word — 太傅 case)
+    {
+      let defined = 0;
+      const segs = new Set(res.value.lines.flatMap((l) => segmentHanzi(l.text)));
+      for (const seg of segs) {
+        if (defined >= 3) break;
+        if ([...seg].length < 2) continue;
+        if (pickSense(seg)) continue;
+        if (await defineWord(seg)) defined++;
+      }
+    }
     const medianPitch = vecPitches.length ? vecPitches[Math.floor(vecPitches.length / 2)]! : 0;
 
     for (const line of res.value.lines) {

@@ -39,6 +39,7 @@ export function toTraditional(text: string): string {
 }
 
 import extra from "./dict-extra.json";
+import unihanExtra from "./unihan-extra.json";
 
 /** Domain supplements: classical/drama vocabulary CEDICT lacks (measured: 太傅/鈞座/卑職 missing → per-char fallback in the word list). */
 export function loadExtraDict(): DictWord[] {
@@ -46,6 +47,19 @@ export function loadExtraDict(): DictWord[] {
     const pyNum = e.pinyin.toLowerCase();
     return { traditional: e.traditional, simplified: e.simplified, pyNum, pyFlat: flatOf(pyNum), english: e.english };
   });
+}
+
+/** Per-character completeness: Unihan readings+glosses for chars CEDICT lacks
+ *  single-char entries for (33.6k entries generated at build time — every
+ *  character becomes answerable with pinyin at minimum). */
+export function loadUnihan(): DictWord[] {
+  return (unihanExtra as { ch: string; simp: string; pinyin: string; english: string }[]).map((e) => ({
+    traditional: e.ch, // traditional form (CEDICT-derived char map applied at generation)
+    simplified: e.simp,
+    pyNum: e.pinyin,
+    pyFlat: flatOf(e.pinyin),
+    english: e.english || "(rare character)",
+  }));
 }
 
 /** Loads CC-CEDICT from the cedict-json package (bundled data, ~122k entries). */
@@ -67,5 +81,5 @@ export function loadCedict(): DictWord[] {
       english: english.length > 400 ? english.slice(0, 400) + "…" : english,
     });
   }
-  return [...out, ...loadExtraDict()];
+  return [...out, ...loadExtraDict(), ...loadUnihan()];
 }
