@@ -247,16 +247,20 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   // FULL reading — take it whole (slicing assumes 1:1 char counts and loses
   // tails when the reading inserts chars: measured 密呈…鈞座 lost 座). Lines
   // improving several fragments keep per-fragment slices (straddle case).
-  const accept = (w: { fStart: number; fEnd: number; matched: number } | null, m: number) =>
-    !!w && ((w.fEnd - w.fStart) / m >= 0.9 || w.matched >= 0.55 * m);
-  const windows = new Map<string, LocalAlign>();
+  // room guard: a genuine reading must be able to cover the fragment's
+  // trimmed tail ((lineLen - endC) >= (m - fEnd)) — without it, another
+  // column's line sharing an in-order phrase (太傅大人 in 明望太傅大人 vs
+  // 太傅大人親啟) substitutes or swallows content (reviewer case 2)
+  const accept = (w: { fStart: number; fEnd: number; startC: number; endC: number; matched: number } | null, m: number, lineLen: number) =>
+    !!w && ((w.fEnd - w.fStart) / m >= 0.9 || w.matched >= 0.55 * m) && (lineLen - w.endC >= m - w.fEnd);
+  const windows = new Map<string, LocalAlign | null>();
   const acceptingFrags: number[][] = lines.map(() => []);
   for (const f of keep) {
     const fChars = [...cleanNorm(f.it.text)];
     for (let li = 0; li < lines.length; li++) {
       const w = localAlign(fChars, lines[li]!.normChars);
       windows.set(`${f.idx}:${li}`, w!);
-      if (accept(w, fChars.length)) acceptingFrags[li]!.push(f.idx);
+      if (accept(w, fChars.length, lines[li]!.normChars.length)) acceptingFrags[li]!.push(f.idx);
     }
   }
   const improvedBy = new Map<number, string>();
@@ -265,7 +269,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
     let best: { text: string; cov: number; score: number } | null = null;
     for (let li = 0; li < lines.length; li++) {
       const w = windows.get(`${f.idx}:${li}`);
-      if (!w || !accept(w, fChars.length)) continue;
+      if (!w || !accept(w, fChars.length, lines[li]!.normChars.length)) continue;
       const cov = (w.fEnd - w.fStart) / fChars.length;
       const whole = acceptingFrags[li]!.length === 1 && cov >= 0.6;
       const slice = whole
@@ -275,7 +279,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       const rank = Math.max(cov, w.matched / fChars.length);
       if (!best || rank > best.cov || (rank === best.cov && w.score > best.score)) best = { text: slice, cov: rank, score: w.score };
     }
-    if (best) improvedBy.set(f.idx, best.text);
+    if (best && best.text !== f.it.text) improvedBy.set(f.idx, best.text);
   }
 
   // assemble fragment lines
@@ -288,8 +292,6 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       matchedFragments: [f.idx], ...(improvedBy.has(f.idx) ? { improved: true } : {}),
     };
   });
-  const usedFragText = new Set([...outLines.map((l) => l.text), ...keep.map((f) => f.it.text)]);
-
   // LLM-ONLY COLUMNS: lines whose content no inventory fragment covers —
   // classical couldn't read the column. Placed into the lattice's FREE GAPS
   // (cross-axis spacing ≥1.8× the column gap, plus the outer edges), in the
@@ -302,7 +304,8 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   const coveredByInventory = (ln: { normChars: string[] }) => {
     for (const f of keep) {
       const fChars = [...cleanNorm(f.it.text)];
-      if (accept(localAlign(fChars, ln.normChars), fChars.length)) return true;
+      const w0 = localAlign(fChars, ln.normChars);
+      if (accept(w0, fChars.length, ln.normChars.length)) return true;
     }
     return false;
   };
@@ -337,7 +340,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       if (crosses[i]! - crosses[i - 1]! >= freeThreshold) slots.push((crosses[i]! + crosses[i - 1]!) / 2);
     }
 
-    slots.sort((a, b) => (verticalPage ? b - a : a - b)); // reading order
+    slots.sort((a, b) => (verticalPage ? a - b : a - b)); // reading order: ascending cross both ways (vertical R→L = ascending in −x cross space; horizontal T→B = ascending y)
     // column start (along axis) from the fragment lines' first-char medians
     const alongOf = (p: [number, number]) => p[0] * ax + p[1] * ay;
     const starts = outLines.map((l) => {
@@ -345,10 +348,14 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       return alongOf([(b0[0] + b0[2]) / 2, (b0[1] + b0[3]) / 2]);
     }).sort((a, b) => a - b);
     const baseAlong = starts[Math.floor(starts.length / 2)]!;
-    const taken = [...crosses];
-    // group variant readings of the SAME missing column (text-similar): one
-    // group = one column = one slot; non-representative members are dropped
-    // (the rare genuine repeat classical also missed is the accepted trade)
+    // SEATING in PIXEL space: cross-space distinctness is not pixel
+    // distinctness on rotated pages (a degenerate cross axis stacks boxes at
+    // one pixel — owner-measured six columns at x=-40). A column is seated
+    // only if its pixel center is ≥0.9×pitch from every seated column.
+    const centerOf = (cross: number) => ({ x: ax * baseAlong + cxn * cross, y: ay * baseAlong + cyn * cross });
+    const takenPix: { x: number; y: number }[] = info.map((i) => ({ x: i.center[0], y: i.center[1] }));
+    // group variant readings of the SAME missing column (text-similar ≥0.55):
+    // one group = one column; non-representative members drop
     const groups: { lines: typeof llmOnly }[] = [];
     const groupDrops: typeof llmOnly = [];
     for (const ln of llmOnly) {
@@ -356,20 +363,43 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       if (g) { g.lines.push(ln); groupDrops.push(ln); } else groups.push({ lines: [ln] });
     }
     for (const d of groupDrops) dropped.push({ n: d.n, text: d.cleanChars.join("") });
-    // slot supply scales to demand: interior free gaps first, then outer
-    // columns stepping by colGap past the last-read edge (a letter's columns
-    // continue past classical's coverage), clamped by image bounds. The old
-    // ONE-outer-slot cap starved real columns (owner-measured: 6 LLM-only
-    // columns, 4 slots, 3 dropped).
-    const verticalPage2 = medAngle > 45 || medAngle < -45;
-    const lastCross = verticalPage2 ? crosses[0]! : crosses[crosses.length - 1]!;
-    const dir = verticalPage2 ? -1 : 1; // reading advances toward the far edge
-    for (let i = 1; i <= groups.length; i++) slots.push(lastCross + dir * colGap * i);
-    for (const ln of groups.map((g) => g.lines[0]!)) {
-      const slot = slots.find((s) => !taken.some((t) => Math.abs(t - s) < 0.9 * pitch));
-      if (slot === undefined) { dropped.push({ n: ln.n, text: ln.cleanChars.join("") }); continue; }
-      slots.splice(slots.indexOf(slot), 1);
-      taken.push(slot);
+    // slot supply: interior free gaps + outer stepping past the last-read
+    // column (both page orientations read toward ascending cross), clamped to
+    // image bounds over all four corners
+    const crossAt = (px: number, py: number) => px * cxn + py * cyn;
+    const corners = dims ? [[0, 0], [dims.w, 0], [0, dims.h], [dims.w, dims.h]] : null;
+    const crossVals = corners ? corners.map(([x, y]) => crossAt(x!, y!)) : null;
+    const maxCross = crossVals ? Math.max(...crossVals) : Infinity;
+    const minCross = crossVals ? Math.min(...crossVals) : -Infinity;
+    const lastCross = crosses[crosses.length - 1]!;
+    const supply = [...slots];
+    for (let i = 1; i <= groups.length; i++) supply.push(lastCross + colGap * i);
+    const candidates = supply
+      .map((c) => Math.max(minCross, Math.min(maxCross, c)))
+      .map(centerOf)
+      .sort((a, b) => (verticalPage ? (b.x - a.x) : (a.y - b.y))); // reading order
+    const seated = new Map<number, { x: number; y: number }>();
+    for (let gi = 0; gi < groups.length; gi++) {
+      const spot = candidates.find((c) =>
+        // seats must be INSIDE the image — an outside seat clamps to the edge
+        // and renders a mangled box (measured: columns stacked at x=-40)
+        (!dims || (c.x > -pitch && c.x < dims.w + pitch && c.y > -pitch && c.y < dims.h + pitch)) &&
+        !takenPix.some((t) => Math.hypot(t.x - c.x, t.y - c.y) < 0.9 * pitch) &&
+        ![...seated.values()].some((t) => Math.hypot(t.x - c.x, t.y - c.y) < 0.9 * pitch));
+      if (spot) seated.set(gi, spot);
+    }
+    const groupLines = groups.map((g) => g.lines[0]!);
+    for (let gi = 0; gi < groupLines.length; gi++) {
+      const ln = groupLines[gi]!;
+      const spot = seated.get(gi);
+      if (!spot) {
+        // the lattice cannot seat this column (rotated page / degenerate axis):
+        // serve the text UNPOSITIONED (loose-words list), never a wrong box
+        outLines.push({ n: ln.n, dir: ln.dir, text: ln.cleanChars.join(""), chars: ln.cleanChars.map((c) => ({ char: c, anchored: false })), angle: null, dirFromLLM: true, gaps: ln.gaps, matchedFragments: [] });
+        continue;
+      }
+      // recover the cross value for placement from the seated pixel center
+      const slot = (spot.x * cxn + spot.y * cyn);
       const chars: FusedChar[] = ln.cleanChars.map((ch, k) => {
         const along = baseAlong + (k + 0.5) * pitch;
         let px = ax * along + cxn * slot;
@@ -391,16 +421,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
   return { lines: outLines, droppedLines: dropped };
 }
 
-function l0(l: FusedLine): number { return l.chars.length; }
 
-/** does inventory text t plausibly contain the LLM line's content (normalized) */
-function covers(t: string, llmText: string): boolean {
-  const A = cleanNorm(t), B = cleanNorm(llmText);
-  if (B.length < 2) return true;
-  let hit = 0;
-  for (const c of new Set([...B])) if (A.includes(c)) hit += [...B].filter((x) => x === c).length;
-  return hit / B.length >= 0.6;
-}
 
 /** fusion result → the app's OcrLine contract. Fragment and inferred lines
  *  carry per-char boxes; nothing is text-only by construction. */

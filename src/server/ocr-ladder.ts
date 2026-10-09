@@ -114,7 +114,7 @@ const RECOGNIZE_SYSTEM = "Transcribe ALL Chinese text visible in the image, in r
 
 // STRUCTURE prompt v2 — validated on the letter fixtures (9 clean lines, correct
 // text, no loops). A/B-matrix rule applies: no edits without bench/ab-letter.ts.
-const STRUCTURE_SYSTEM = `You are an OCR reader. Transcribe every PHYSICAL line or column of Chinese text, one at a time.
+export const STRUCTURE_SYSTEM = `You are an OCR reader. Transcribe every PHYSICAL line or column of Chinese text, one at a time.
 Return ONLY valid JSON: {"lines":[{"n":1,"text":"…","dir":"h"|"v"}]}
 Rules:
 - Each physical line/column = one entry, numbered sequentially (n:1, n:2, ...)
