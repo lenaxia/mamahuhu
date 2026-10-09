@@ -12,8 +12,14 @@
  * Det-empty (no text found — e.g. synthetic curved text) → fallback service
  * (the legacy single-pass path). Geometry lives in ocr-geometry.ts (unit-tested).
  */
+import OpenCC from "opencc-js";
 import sharp from "sharp";
 import type { OcrLine, OcrService, Result } from "./ports";
+
+// The app's output contract is ALWAYS Traditional (owner rule) — the reader
+// drifts between scripts photo-to-photo (measured: same poster, mixed lines);
+// normalizing post-read also makes duplicate detection script-consistent.
+const toTrad = OpenCC.Converter({ from: "cn", to: "tw" });
 import { axisAngle, axisFlip, charCells, charSim, dedupeQuads, expectChars, readingOrder, splitQuad, validateRead, type Quad } from "./ocr-geometry";
 
 type DetQuad = Quad & { pts: [number, number][] };
@@ -59,7 +65,7 @@ export class PipelineOcrService implements OcrService {
 
   private async pipeline(det: { quads: DetQuad[]; w: number; h: number }, bytes: Uint8Array): Promise<Result<{ lines: OcrLine[]; servedBy?: string }>> {
 
-    const ordered = readingOrder(dedupeQuads(det.quads));
+    const ordered = readingOrder(dedupeQuads(det.quads)); // IoU dedupe: adjacent dense rows survive, same-region double-reads die
     const meta = await sharp(bytes).metadata();
     const W = meta.width ?? det.w, H = meta.height ?? det.h;
 
@@ -77,11 +83,19 @@ export class PipelineOcrService implements OcrService {
       const angle = axisAngle(members[0]!) + (axisFlip(members[0]!) ? 180 : 0); // upright crops regardless of corner order
       const { buf, plan } = await this.rotateFull(bytes, angle);
       const queue = [...members];
-      const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+      const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
         for (;;) {
           const q = queue.shift();
           if (!q) return;
-          reads.set(q, await this.readCrop(await this.cropQuad(buf, plan, q)));
+          const crop = await this.cropQuad(buf, plan, q);
+          let text = await this.readCrop(crop);
+          if (text.length === 0) {
+            // read variance: model occasionally returns blank for a clean crop — one retry
+            console.log("[ocr-pipeline] empty read — retrying once");
+            text = await this.readCrop(crop);
+          }
+          if (text.length === 0) console.warn(`[ocr-pipeline] read empty after retry: quad at [${q.pts[0]![0]},${q.pts[0]![1]}]`);
+          reads.set(q, text);
         }
       });
       await Promise.all(workers);
@@ -91,7 +105,7 @@ export class PipelineOcrService implements OcrService {
     const raw: OcrLine[] = [];
     for (const q of ordered) {
       const ang = axisAngle(q);
-      const parts = (reads.get(q) ?? "").split(/\n+/).map((t) => t.trim()).filter((t) => t.length > 0);
+      const parts = (reads.get(q) ?? "").split(/\n+/).map((t) => toTrad(t.trim())).filter((t) => t.length > 0);
       const quadsForParts = parts.length > 1 ? splitQuad(q, parts.length) : [q];
       parts.forEach((text, i) => {
         const sq = quadsForParts[i]!;

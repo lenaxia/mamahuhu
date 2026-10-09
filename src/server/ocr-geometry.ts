@@ -87,11 +87,24 @@ export function medianAngle(angles: number[]): number {
 }
 
 /**
- * Drop detector double-reads: quads whose TEXT-FRAME boxes overlap ≥0.6 of the
- * smaller. Frame-space (not AABB) is essential — slanted lines overlap heavily
- * as AABBs without being dupes (the letter fixture pins this: 9 slanted lines
- * whose AABBs overlap ≥0.6 all survive).
+ * Drop detector double-reads: quads whose TEXT-FRAME boxes have IoU ≥ 0.6.
+ * Frame-space (not AABB) is essential — slanted lines overlap heavily as
+ * AABBs without being dupes. IoU (not overlap-of-smaller) is essential the
+ * other way: tightly-spaced ADJACENT rows (dense wrapped paragraphs) overlap
+ * heavily as a fraction of the smaller box but have low IoU — they are
+ * different lines and must survive (owner photo regression). True double-
+ * reads box the same region: IoU ≈ 0.9+. Same-content stragglers are caught
+ * downstream by the text-similarity layer.
  */
+export function iou(a: Box, b: Box): number {
+  const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+  const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const inter = ix * iy;
+  if (inter <= 0) return 0;
+  const uni = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
+  return uni > 0 ? inter / uni : 0;
+}
+
 export function dedupeQuads<T extends Quad>(quads: T[]): T[] {
   if (quads.length === 0) return [];
   const med = medianAngle(quads.map(quadAngle));
@@ -101,9 +114,67 @@ export function dedupeQuads<T extends Quad>(quads: T[]): T[] {
   const sorted = [...quads].sort((a, b) => area(fb.get(b)!) - area(fb.get(a)!));
   const kept: T[] = [];
   for (const q of sorted) {
-    if (!kept.some((k) => overlapFrac(fb.get(q)!, fb.get(k)!) >= 0.6)) kept.push(q);
+    if (!kept.some((k) => iou(fb.get(q)!, fb.get(k)!) >= 0.6)) kept.push(q);
   }
   return kept;
+}
+
+/**
+ * Merge collinear fragments: same text axis (±8° of the shared median),
+ * centers within 0.35× the thinner quad's thickness PERPENDICULAR to the
+ * axis (fragments of ONE line barely differ; adjacent lines differ by a
+ * full pitch — 0.75 was too loose and chained whole columns together),
+ * axially contiguous (gap ≤ 1.5× thickness) → one spanning quad.
+ * Det splits a single column into stacked fragments (owner photo:
+ * 卑職深知… + 大不敢有絲 are two reads of one column).
+ */
+export function mergeCollinear<T extends Quad>(quads: T[]): Quad[] {
+  if (quads.length < 2) return quads;
+  const med = medianAngle(quads.map(axisAngle));
+  // canonical rotation makes text HORIZONTAL in frame space (axis = x', perp = y')
+  const items = quads.map((q) => {
+    const a = axisAngle(q);
+    const fb = frameBox(q, med);
+    return { q, a, fb };
+  });
+  const perp = (fb: Box) => (fb[1] + fb[3]) / 2;
+  const axial = (fb: Box) => [fb[0], fb[2]] as const;
+  const thickness = (fb: Box) => fb[3] - fb[1];
+  const parent = items.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i]!)));
+  const union = (i: number, j: number) => { parent[find(i)] = find(j); };
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const A = items[i]!, B = items[j]!;
+      if (Math.abs(A.a - med) > 8 || Math.abs(B.a - med) > 8) continue;
+      const thin = Math.min(thickness(A.fb), thickness(B.fb));
+      if (Math.abs(perp(A.fb) - perp(B.fb)) > 0.35 * thin) continue;
+      const [a0, a1] = axial(A.fb), [b0, b1] = axial(B.fb);
+      const gap = Math.max(0, Math.max(a0, b0) - Math.min(a1, b1));
+      if (gap > 1.5 * thin) continue;
+      union(i, j);
+    }
+  }
+  const groups = new Map<number, number[]>();
+  items.forEach((_, i) => {
+    const r = find(i);
+    (groups.get(r) ?? groups.set(r, []).get(r)!).push(i);
+  });
+  const rad = (med * Math.PI) / 180;
+  const back = (x: number, y: number): [number, number] => {
+    // rotate frame coords back to original space (frameBox rotated by -med about origin)
+    const c = Math.cos(rad), sn = Math.sin(rad);
+    return [x * c - y * sn, x * sn + y * c];
+  };
+  const out: Quad[] = [];
+  for (const [root, members] of groups) {
+    if (members.length === 1) { out.push(items[root]!.q); continue; }
+    const fbs = members.map((m) => items[m]!.fb);
+    const l = Math.min(...fbs.map((b) => b[0])), t = Math.min(...fbs.map((b) => b[1]));
+    const r = Math.max(...fbs.map((b) => b[2])), bo = Math.max(...fbs.map((b) => b[3]));
+    out.push({ pts: [back(l, t), back(r, t), back(r, bo), back(l, bo)] });
+  }
+  return out;
 }
 
 /**
@@ -124,10 +195,6 @@ export function readingOrder<T extends Quad>(quads: T[]): T[] {
     const bandA = Math.round(ba[1] / Math.max(1, bandH)), bandB = Math.round(bb[1] / Math.max(1, bandH));
     return bandA - bandB || ba[0] - bb[0];
   });
-}
-
-function xCentroid(q: Quad): number {
-  return q.pts.reduce((s, p) => s + p[0], 0) / q.pts.length;
 }
 
 /** char count a quad's geometry implies: longest edge / thickness (POC-calibrated) */
@@ -189,7 +256,6 @@ export function splitQuad<T extends Quad>(q: T, k: number): Quad[] {
   }
   return out;
 }
-
 /** character-multiset similarity (0-1) — duplicate-line detection */
 export function charSim(a: string, b: string): number {
   const count = (t: string) => { const m: Record<string, number> = {}; for (const c of t) m[c] = (m[c] ?? 0) + 1; return m; };
@@ -199,3 +265,52 @@ export function charSim(a: string, b: string): number {
   for (const c in cb) lb += cb[c]!;
   return hit / Math.max(1, Math.min(la, lb));
 }
+
+function xCentroid(q: Quad): number {
+  return q.pts.reduce((s2, p) => s2 + p[0], 0) / q.pts.length;
+}
+
+/**
+ * Fill missing columns at regular pitch: when ≥4 near-vertical columns share
+ * a consistent x-pitch, a gap ≥1.6× the median pitch marks an undetected
+ * column (owner photo: 8 of 9 found — 確為真品 missed at every threshold).
+ * The synthesized quad spans the median column extent at the gap position —
+ * the ink is real, det simply didn't box it; the crop read recovers the text.
+ */
+export function fillGaps<T extends Quad>(quads: T[]): Quad[] {
+  const cols = quads.filter((q) => Math.abs(axisAngle(q)) >= 45);
+  if (cols.length < 4) return quads;
+  // columns are near-vertical: page-x position ≈ AABB x-center (crops get
+  // per-quad deskew later, so a plain vertical AABB synthesis is fine)
+  const infos = cols.map((q) => {
+    const xs = q.pts.map((p) => p[0]), ys = q.pts.map((p) => p[1]);
+    const l = Math.min(...xs), r2 = Math.max(...xs), t = Math.min(...ys), b = Math.max(...ys);
+    return { cx: (l + r2) / 2, w: r2 - l, t, b };
+  }).sort((a, b) => a.cx - b.cx);
+  const pitches: number[] = [];
+  for (let i = 1; i < infos.length; i++) pitches.push(infos[i]!.cx - infos[i - 1]!.cx);
+  const med = medianAngle(pitches);
+  const medW = medianAngle(infos.map((i) => i.w));
+  // pitch must be CONSISTENT (uneven spacing → estimate is noise; synthesizing
+  // from noise fabricated dozens of phantom columns — owner photo regression)
+  if (med < 8 || med > 500) return quads;
+  // most pitches near-median (a missing column shows as ONE 2× pitch among
+  // normals; irregular layouts fail this and are left alone)
+  const near = pitches.filter((p) => Math.abs(p - med) <= 0.25 * med).length;
+  if (near < 0.6 * pitches.length) return quads;
+  const out: Quad[] = [...quads];
+  for (let i = 1; i < infos.length; i++) {
+    const gap = infos[i]!.cx - infos[i - 1]!.cx;
+    if (gap < 1.6 * med) continue;
+    const nMissing = Math.round(gap / med) - 1;
+    if (nMissing > 2) continue; // a 3+ column hole means the pitch model is wrong
+    for (let k = 1; k <= nMissing; k++) {
+      const cx = infos[i - 1]!.cx + (gap * k) / (nMissing + 1);
+      const t = medianAngle(infos.map((x) => x.t)), b = medianAngle(infos.map((x) => x.b));
+      const l = cx - medW / 2, r3 = cx + medW / 2;
+      out.push({ pts: [[l, t], [r3, t], [r3, b], [l, b]] });
+    }
+  }
+  return out;
+}
+

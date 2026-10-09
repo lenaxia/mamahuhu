@@ -59,7 +59,7 @@ describe("ocr-geometry (pipeline v2 pure functions)", () => {
   });
 
   it("dedupeQuads on the poster fixture is deterministic (pin the count)", () => {
-    expect(dedupeQuads(posterFixture.quads).length).toBe(18); // self-consistent longest-edge median (python POC's PCA median dropped one fewer — different frame estimate, not a regression)
+    expect(dedupeQuads(posterFixture.quads).length).toBe(22); // IoU rule: adjacent tight rows survive; offset double-reads pass to the text-sim layer
   });
 
   it("readingOrder: horizontal rows sort by y-band then x; vertical columns sort right-to-left", () => {
@@ -148,9 +148,9 @@ describe("pipeline v2 structure regression (committed det fixtures, offline)", (
 
   it("poster: dedupe deterministic, rows group into a stable order, every quad yields cells", () => {
     const kept = dedupeQuads(posterFixture.quads);
-    expect(kept.length).toBe(18);
+    expect(kept.length).toBe(22);
     const ordered = readingOrder(kept);
-    expect(ordered.length).toBe(18);
+    expect(ordered.length).toBe(22);
     for (const q of ordered) {
       const n = expectChars(q);
       expect(charCells(q, n)).toHaveLength(n);
@@ -248,5 +248,53 @@ describe("review fixes", () => {
     const q = quadAt(0, 40, 20); // tiny quad
     const cells = charCells(q, 10); // 10 chars on 40px axis
     expect(cells[0]![2] - cells[0]![0]).toBeGreaterThanOrEqual(3); // clamped, not 4px→3.9 rounded
+  });
+});
+
+
+describe("dense-row survival + fragment merge + column gap-fill", () => {
+  it("tightly-spaced adjacent rows survive dedupe (owner photo regression: every-other-line loss)", async () => {
+    const { dedupeQuads, iou } = await import("../../src/server/ocr-geometry");
+    // two adjacent rows, y-offset 0.7× height: small-frac overlap ≥0.6 but IoU <0.6
+    const a = quadAt(0, 300, 40, [0, 0]);
+    const b = quadAt(0, 300, 40, [0, 28]); // offset 28 of 40 → same span, IoU = 12/68 ≈ 0.18
+    expect(iou([0,0,300,40], [0,28,300,68])).toBeLessThan(0.6);
+    expect(dedupeQuads([a, b])).toHaveLength(2);
+    const dup = quadAt(0, 300, 40, [500, 500]);
+    const dupShift = { pts: quadAt(0, 300, 40, [503, 502]).pts };
+    expect(dedupeQuads([dup, dupShift])).toHaveLength(1); // true double-read still dies
+  });
+
+  it("mergeCollinear joins stacked fragments of one column", async () => {
+    const { mergeCollinear, frameBox, axisAngle } = await import("../../src/server/ocr-geometry");
+    // one column split into two stacked 70° fragments (perpendicular gap small)
+    const top = quadAt(70, 400, 60, [400, 100]);
+    const bot = quadAt(70, 400, 60, [400 + 60 * Math.cos(Math.PI/180*160) * 0, 100 + 420]); // offset along axis
+    void top; void bot;
+    const r = (d: number) => (d * Math.PI) / 180;
+    const mk = (at: [number, number], len: number, th: number, deg: number) => {
+      const u = [Math.cos(r(deg)), Math.sin(r(deg))], v = [-u[1]!, u[0]!];
+      const p = (s2: number, t2: number): [number, number] => [at[0]! + u[0]! * s2 + v[0]! * t2, at[1]! + u[1]! * s2 + v[1]! * t2];
+      return { pts: [p(0, 0), p(len, 0), p(len, th), p(0, th)] };
+    };
+    const frag1 = mk([400, 100], 300, 50, 70);
+    const frag2 = mk([400 + 350 * Math.cos(r(70)), 100 + 350 * Math.sin(r(70))], 300, 50, 70);
+    const merged = mergeCollinear([frag1, frag2]);
+    expect(merged.length).toBe(1);
+    const fb = frameBox(merged[0]!, axisAngle(merged[0]!));
+    expect(fb[2] - fb[0]).toBeGreaterThan(550); // spans both fragments along the text axis (x' in frame)
+  });
+
+  it("fillGaps synthesizes a missing column at regular pitch (letter photo: 8 found, 9 exist)", async () => {
+    const { fillGaps } = await import("../../src/server/ocr-geometry");
+    const r = (d: number) => (d * Math.PI) / 180;
+    const mk = (x: number) => {
+      const u = [Math.cos(r(70)), Math.sin(r(70))], v = [-u[1]!, u[0]!];
+      const p = (s2: number, t2: number): [number, number] => [x + u[0]! * s2 + v[0]! * t2, 500 + u[1]! * s2 + v[1]! * t2];
+      return { pts: [p(0, 0), p(800, 0), p(800, 60), p(0, 60)] };
+    };
+    const xs = [100, 190, 280, 370, 550, 640, 730, 820]; // gap at 460 (pitch 90)
+    const filled = fillGaps(xs.map(mk));
+    expect(filled.length).toBe(9);
   });
 });
