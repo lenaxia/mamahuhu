@@ -104,3 +104,42 @@ describe("integration with real CC-CEDICT", () => {
     expect(first(r3).traditional).toBe("謝謝");
   }, 30000);
 });
+
+describe("tone-aware interpretation (owner regression: gan3 fu4)", () => {
+  const toned: DictWord[] = [
+    ...mini,
+    w("趕赴", "赶赴", "gan3 fu4", "to hurry / to rush"),
+    w("乹", "乹", "gan1", "old variant of 乾"),
+    w("㳇", "㳇", "fu4", "(used in place names)"),
+    w("敢", "敢", "gan3", "dare"),
+    w("付", "付", "fu4", "pay"),
+  ];
+  const tindex = buildIndex(toned);
+
+  it("gan3 fu4 → 趕赴 is the ONLY interpretation; 乹㳇 char-soup is not a word and never appears", () => {
+    const r = interpret(["gan", "fu"], tindex, [3, 4]);
+    expect(first(r).traditional).toBe("趕赴");
+    expect(r.map((x) => x.traditional)).toEqual(["趕赴"]);
+    expect(first(r).exactEntry).toBe(true);
+  });
+
+  it("char soup still shows when NO real word covers the syllables", () => {
+    const soupOnly: DictWord[] = [w("乹", "乹", "gan1", "old variant of 乾"), w("㳇", "㳇", "fu4", "(used in place names)")];
+    const sindex = buildIndex(soupOnly);
+    const r = interpret(["gan", "fu"], sindex);
+    expect(first(r).traditional).toBe("乹㳇");
+    // and its gloss is its own chars' glosses — never a borrowed one
+    expect(first(r).english.toLowerCase()).toContain("variant");
+    expect(first(r).exactEntry).toBe(false);
+  });
+
+  it("toneless input behaves as before (no penalty)", () => {
+    const r = interpret(["gan", "fu"], tindex);
+    expect(first(r).traditional).toBe("趕赴"); // word beats soup regardless
+  });
+
+  it("neutral-tone entries (5) are wild — zhi dao4 still reads 知道", () => {
+    const r = interpret(["zhi", "dao"], tindex, [1, 4]);
+    expect(r[0]!.words.map((x) => x.traditional)).toContain("知道");
+  });
+});

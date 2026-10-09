@@ -30,3 +30,12 @@ export const COMMON_WORDS = new Set(
 );
 
 export const isCommon = (traditional: string): boolean => COMMON_WORDS.has(traditional);
+
+// Frequency-derived common set: OpenSubtitles zh word frequencies (top 4k),
+// mapped to traditional — replaces hand-curation for discrimination tasks
+// (isCommon must separate 然 from 嘫; the parenting list above cannot).
+import freqCommon from "./freq-common.json";
+const FREQ_COMMON = new Set<string>(freqCommon as string[]);
+export function isFrequent(w: string): boolean {
+  return COMMON_WORDS.has(w) || FREQ_COMMON.has(w);
+}

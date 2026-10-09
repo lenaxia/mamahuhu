@@ -61,7 +61,7 @@ import {
   UnavailableStt,
   UnavailableTts,
 } from "./llm";
-import { candidates, interpret, normalizePinyinInput, renderWord, segmentHanzi } from "../shared/fuzzy";
+import { candidates, interpret, normalizePinyinTokened, renderWord, segmentHanzi } from "../shared/fuzzy";
 import { makeDefiner } from "./dict";
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
 import { parseImageDims } from "./imageinfo";
@@ -408,9 +408,13 @@ async function buildPhrase(
   app.post("/api/ask/pinyin", async (c) => {
     const parsed = PinyinReqSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "bad request" }, 400);
-    const norm = normalizePinyinInput(parsed.data.text);
+    const tokened = normalizePinyinTokened(parsed.data.text);
+    const norm = tokened.map((t) => t.flat);
+    // flatten per-syllable tones across tokens (undefined-padding when absent)
+    const tones: number[] = [];
+    for (const t of tokened) for (const tn of t.tones) tones.push(tn);
     const res = PinyinResSchema.parse({
-      interpretations: interpret(norm, dictionary.index),
+      interpretations: interpret(norm, dictionary.index, tones.length ? tones : undefined),
       candidates: candidates(norm, dictionary.index),
     });
     await recordAsk(sql, c.get("user").id, "pinyin", parsed.data.text, res);

@@ -78,7 +78,7 @@ const MARKED: Record<string, string[]> = {
   a: ["ā", "á", "ǎ", "à"], e: ["ē", "é", "ě", "è"], i: ["ī", "í", "ǐ", "ì"],
   o: ["ō", "ó", "ǒ", "ò"], u: ["ū", "ú", "ǔ", "ù"], v: ["ǖ", "ǘ", "ǚ", "ǜ"],
 };
-const UNMARK: Record<string, [string, number]> = {};
+export const UNMARK: Record<string, [string, number]> = {};
 for (const [b, arr] of Object.entries(MARKED)) {
   arr.forEach((mk, i) => { UNMARK[mk] = [b, i + 1]; });
 }

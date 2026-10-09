@@ -1,6 +1,6 @@
 import type { DictWord } from "./cedict";
-import { numberedToBpmf, numberedToMarks, phraseToBpmf, phraseToMarks, stripToneMarks } from "./bpmf";
-import { isCommon } from "./common";
+import { numberedToBpmf, numberedToMarks, phraseToBpmf, phraseToMarks, UNMARK } from "./bpmf";
+import { isCommon, isFrequent } from "./common";
 import type { Interpretation, RenderedWord, SyllableChar } from "./types";
 
 export interface DictIndex {
@@ -17,7 +17,7 @@ export function buildIndex(words: DictWord[]): DictIndex {
   const bySyl = new Map<string, DictWord[]>();
   const syllables = new Set<string>();
   // common words first, so bucket caps keep the useful entries
-  const sorted = [...words].sort((a, b) => Number(isCommon(b.traditional)) - Number(isCommon(a.traditional)));
+  const sorted = [...words].sort((a, b) => Number(isFrequent(b.traditional)) - Number(isFrequent(a.traditional)));
   for (const w of sorted) {
     const cur = byFlat.get(w.pyFlat);
     if (cur) { if (cur.length < 8) cur.push(w); } else byFlat.set(w.pyFlat, [w]);
@@ -36,12 +36,21 @@ export function buildIndex(words: DictWord[]): DictIndex {
 
 /** Lowercase, strip tones/junk, canonicalize ü→v, apply common misspelling repairs. */
 export function normalizePinyinInput(text: string): string[] {
-  const s = stripToneMarks(text)
-    .replace(/[^a-z ]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!s) return [];
-  return s.split(" ").map((t) =>
+  return normalizePinyinTokened(text).map((t) => t.flat);
+}
+
+/** Token with per-syllable TONES preserved from the typed digits (gan3 → {gan,[3]}).
+ *  Tones are the strongest signal the user gives — the interpreter scores them. */
+export interface PinyinToken { flat: string; tones: number[] }
+
+export function normalizePinyinTokened(text: string): PinyinToken[] {
+  // strip accents FIRST (ü→v inside stripToneMarks), then capture digit-tone
+  // boundaries: "zhong1wen2" → [zhong(1), wen(2)]
+  // keep tone DIGITS (stripToneMarks removes them); accents→plain via per-char map
+  const lowered = text.toLowerCase();
+  const deaccented = [...lowered].map((c) => { const u = UNMARK[c]; return u ? u[0] : c; }).join("").replace(/ü/g, "v");
+  const raw = deaccented.split(/[^a-z0-9v]+/).filter(Boolean);
+  const repair = (t: string) =>
     t
       .replace(/^ts/, "c")
       .replace(/^tz/, "z")
@@ -50,8 +59,22 @@ export function normalizePinyinInput(text: string): string[] {
       .replace(/ung/g, "ong")
       .replace(/au/g, "ao")
       .replace(/ih$/, "i")
-      .replace(/ow$/, "ou")
-  );
+      .replace(/ow$/, "ou");
+  const out: PinyinToken[] = [];
+  for (const tok of raw) {
+    const flat = tok.replace(/[^a-zv]/g, "");
+    // tones: digits that follow letters, in order — aligned to syllables in order
+    const tones: number[] = [];
+    const m = tok.match(/[a-zv]+([1-5])/g);
+    if (m) for (const part of m) tones.push(Number(part.replace(/[a-zv]/g, "")));
+    if (flat) out.push({ flat: repair(flat), tones });
+  }
+  return out;
+}
+
+/** entry tone per syllable from pyNum ("gan3 fu4" → [3,4]; 5 = neutral/wild) */
+function entryTones(pyNum: string): number[] {
+  return pyNum.split(/\s+/).filter(Boolean).map((syl) => Number(syl.replace(/[^1-5]/g, "")) || 0);
 }
 
 /** Split a token into valid syllables (min-segment DP). Returns null if impossible. */
@@ -101,10 +124,13 @@ export function wordChars(w: RenderedWord): SyllableChar[] {
 interface PathNode { score: number; words: DictWord[]; }
 
 /** k-best phrase interpretations of normalized pinyin syllables. */
-export function interpret(input: string[], index: DictIndex): Interpretation[] {
+export function interpret(input: string[], index: DictIndex, inputTones?: number[]): Interpretation[] {
   const tokens = input.map((t) => ({ token: t, syls: splitToken(t, index.syllables) }));
   if (tokens.some((t) => t.syls === null)) return []; // unmatched → candidates only
   const syls = tokens.flatMap((t) => t.syls ?? []);
+  // per-syllable input tones (aligned by position; undefined = user gave none)
+  const tones: (number | undefined)[] = new Array(syls.length).fill(undefined);
+  if (inputTones) for (let i = 0; i < Math.min(inputTones.length, syls.length); i++) tones[i] = inputTones[i];
   const n = syls.length;
   if (n === 0 || n > 24) return [];
   const dp: PathNode[][] = Array.from({ length: n + 1 }, () => []);
@@ -118,8 +144,24 @@ export function interpret(input: string[], index: DictIndex): Interpretation[] {
         for (const e of entries) {
           // common-word boost only applies to multi-char words: it disambiguates
           // alternatives (知道 vs 制導), it must not make single-char soup win
-          const boost = e.traditional.length > 1 && isCommon(e.traditional) ? 0.6 : 0;
-          const score = path.score + L - 0.35 + (e.traditional.length === L ? 0.05 : 0) + boost;
+          // tiered: curated parenting list > generic subtitle frequency > rest
+          // (tones break real ties; toneless input needs deterministic order)
+          let boost = 0;
+          if (e.traditional.length > 1) boost = isCommon(e.traditional) ? 0.75 : isFrequent(e.traditional) ? 0.6 : 0;
+          else if (isCommon(e.traditional)) boost = 0.1;
+          // rare single chars (Unihan variants: 㘵, 佈…) are legitimate LAST-resort
+          // interpretations but must not pollute phrase alternatives
+          const rareSingle = [...e.traditional].length === 1 && !isFrequent(e.traditional) ? 0.45 : 0;
+          // TONE SCORING: the user's typed tones are the strongest signal —
+          // 乹 (gān) must lose to 趕 (gǎn) for input gan3. Neutral tone (5)
+          // entries are wild (sandhi); toneless input is unaffected.
+          let tonePenalty = 0;
+          const eT = entryTones(e.pyNum);
+          for (let k = 0; k < L; k++) {
+            const want = tones[i + k], got = eT[k] ?? 0;
+            if (want && got && got !== 5 && want !== got) tonePenalty += 0.5;
+          }
+          const score = path.score + L - 0.35 + (e.traditional.length === L ? 0.05 : 0) + boost - tonePenalty - rareSingle;
           const node = { score, words: [...path.words, e] };
           const bucket = dp[i + L];
           if (!bucket) continue;
@@ -130,15 +172,25 @@ export function interpret(input: string[], index: DictIndex): Interpretation[] {
       }
     }
   }
+  // collect paths first: all-single-char compositions (乹+㳇 char soup) are
+  // only legitimate when NO real-word path exists — a soup that merely chains
+  // per-syllable characters is not a dictionary result
+  const paths = dp[n] ?? [];
+  const hasRealWordPath = paths.some((p) => p.words.some((w) => [...w.traditional].length > 1));
   const seen = new Set<string>();
   const out: Interpretation[] = [];
-  for (const p of dp[n] ?? []) {
+  for (const p of paths) {
+    if (hasRealWordPath && p.words.every((w) => [...w.traditional].length === 1)) continue;
     const key = p.words.map((w) => w.traditional).join("|") + "#" + p.words.map((w) => w.pyNum).join("|");
     if (seen.has(key)) continue;
     seen.add(key);
     const words = p.words.map(renderWord);
     const fullFlat = syls.join("");
-    const exact = index.byFlat.get(fullFlat)?.find((e) => e.traditional.length === n);
+    // exact-English override ONLY for a single-word path that IS the entry —
+    // a soup must never borrow a real word's gloss (the 乹㳇 "to hurry" bug)
+    const exact = p.words.length === 1
+      ? index.byFlat.get(fullFlat)?.find((e) => e.traditional === p.words[0]!.traditional)
+      : undefined;
     out.push({
       traditional: words.map((w) => w.traditional).join(""),
       simplified: words.map((w) => w.simplified).join(""),
