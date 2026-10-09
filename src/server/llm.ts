@@ -2,7 +2,7 @@ import { LlmTranslateSchema, type CardVariant } from "../shared/api";
 import { z } from "zod";
 import { marksToNumbered, numberedToBpmf, numberedToMarks } from "../shared/bpmf";
 import { normalizeBoxes, parseImageDims } from "./imageinfo";
-import type { ChatClient, ChatMessage, ChatOptions, Result, TranslationService, TtsService, SttService, OcrService, OcrLine, DescribeService, DescribeTag, TaggingService, FollowUpService } from "./ports";
+import type { ChatClient, ChatMessage, ChatOptions, Result, TranslateOutcome, TranslationService, TtsService, SttService, OcrService, OcrLine, DescribeService, DescribeTag, TaggingService, FollowUpService } from "./ports";
 
 const isHan = (ch: string): boolean => /\p{Script=Han}/u.test(ch);
 const countHanzi = (s: string): number => [...s].filter(isHan).length;
@@ -205,7 +205,7 @@ Rules:
 export class LlmTranslationService implements TranslationService {
   constructor(private chat: ChatClient, private model: string) {}
 
-  async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
+  async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<TranslateOutcome>> {
     const variety = opts?.variety ?? "zh-Hant";
     const messages: ChatMessage[] = [
       { role: "system", content: variety === "zh-HK" ? TRANSLATE_SYSTEM_CANTO : TRANSLATE_SYSTEM },
@@ -303,7 +303,7 @@ export class MockTranslationService implements TranslationService {
     return { ok: true, value: `MOCK full translation of: ${text.slice(0, 40)}` };
   }
 
-  async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<{ casual: CardVariant; formal: CardVariant; alternatives: { casual: CardVariant; formal: CardVariant }[]; understood?: string }>> {
+  async translate(text: string, opts?: { audience?: string; variety?: "zh-Hant" | "zh-HK" }): Promise<Result<TranslateOutcome>> {
     const t = text.toLowerCase();
     if (opts?.variety === "zh-HK") {
       // bedtime formula regression fixture (register trap): the idiomatic 早唞,
