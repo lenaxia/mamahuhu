@@ -150,9 +150,19 @@ export function fuseAndServe(
   const result = fuseStructure(items, parseStructureLines(structureRaw), dims);
   const totalChars = result.lines.reduce((s, l) => s + l.chars.length, 0);
   if (totalChars === 0) return null;
+  // VECTOR-BEATS-FUSION gate: on a degenerate lattice (diagonal/handwritten
+  // pages where classical reads strips, not columns) fusion's geometry is
+  // worthless — the vector rung's per-line from→to vectors position EVERY
+  // column and transcribe ~80% correct (the v0.5-0.6 behavior). Route there.
+  if (result.latticeDegenerate) return null;
   // fragment-inventory: every inventory line is anchored by construction;
   // inferred lines (LLM-only columns) are not. Truthfulness floor: ≥20% of
   // chars must live on real fragments, else the vector rung serves.
+  // VECTOR-BEATS-FUSION: on a degenerate lattice (diagonal/handwritten pages
+  // where classical reads strips, not columns) fusion's geometry is worthless —
+  // the vector rung's per-line from→to vectors position EVERY column and
+  // transcribe ~80% correct (the v0.5-0.6 behavior). Route there.
+  if (result.latticeDegenerate) return null;
   const anchoredChars = result.lines.filter((l) => !l.inferred).reduce((s, l) => s + l.chars.length, 0);
   const anchoredFraction = anchoredChars / totalChars;
   const fused = fusedToOcrLines(result);

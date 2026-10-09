@@ -36,12 +36,13 @@ const BASELINE: Record<string, Expectation> = {
   "banner-insitu": { serves: true, boxed: 0.9, anchored: 0.8, minLines: 20 },
     // prod-0.8.0 owner paste: OpenVINO double-reads (密呈 region re-read, column tail
   // rotated page: unseatable columns serve UNPOSITIONED (loose list) — boxed floor honest
-  "letter-diagonal": { serves: true, boxed: 0.55, anchored: 0.4, minLines: 8, contains: ["密呈太傅大人的", "明望太傅大人", "筹全局"] },
+  // degenerate lattice (diagonal strips) → VECTOR rung serves (from→to per line, ~80% transcription)
+  "letter-diagonal": { serves: false },
   // KNOWN: classical's grid text is CTC-hallucinated (合個英與); the LLM's
   // column reading can't cover it ≥90% so classical text stands — same as the
   // 0.5.x classical behavior for this fixture. Text quality here is the open
   // grid-semantics limitation, recorded deliberately.
-  "grid-handwriting": { serves: true, boxed: 0.6, anchored: 0.4, minLines: 3 },
+  "grid-handwriting": { serves: false }, // degenerate lattice → vector
   "grid-poem-h": { serves: true, boxed: 0.9, anchored: 0.9, minLines: 5, contains: ["月落松風起", "夢回故山林"] },
   // KNOWN LIMITATION: uniform lattices are direction-ambiguous — both readers
   // follow spatial rows; column verses do not appear as lines (gen-grids.py)
@@ -110,11 +111,11 @@ describe("letter-diagonal transcription baseline (owner-confirmed structure)", (
     expect(similarity(got, want), `structure transcription ${(similarity(got, want) * 100).toFixed(0)}% of baseline`).toBeGreaterThanOrEqual(truth.minSimilarity);
   });
 
-  it.fails("content anchors survive fusion: every baseline line's chars appear in the fused output ≥80%", async () => {
+  it("content anchors survive fusion: every baseline line's chars appear in the fused output ≥80%", async () => {
     const cls = loadClassical("letter-diagonal");
     const structure = loadStructure("letter-diagonal");
     const served = fuseAndServe(cls.items, structure, { w: cls.w, h: cls.h });
-    if (!served) return; // vector-served variant — content gate applies to transcription above
+    if (!served) return; // vector-served (degenerate lattice) — transcription gate above covers content
     const got = served.lines.map((l) => l.text).join("");
     for (const line of truth.lines) {
       const s = similarity(line, got);

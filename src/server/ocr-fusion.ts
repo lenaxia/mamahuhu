@@ -50,6 +50,10 @@ export interface FusionResult {
   lines: FusedLine[];
   /** LLM lines that matched no fragment and lost their slot — diagnostics */
   droppedLines: { n: number; text: string }[];
+  /** true when the fragment lattice cannot represent the page (diagonal
+   *  strips read as rows / orientation disagreement) — fusion's geometry is
+   *  worthless and the VECTOR rung (from→to per line) is the better server */
+  latticeDegenerate?: boolean;
 }
 
 // ---------- tokenization / parsing ----------
@@ -309,7 +313,26 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
     }
     return false;
   };
-  const llmOnly = lines.filter((ln) => ln.cleanChars.length >= 2 && !coveredByInventory(ln));
+  const medianFragmentAngle = (() => {
+    const angles = keep.map((f) => {
+      const a = axisFromBox(f.it.box, [...f.it.text].length, "v");
+      return Math.round((Math.atan2(a.uy, a.ux) * 180) / Math.PI);
+    }).sort((a, b) => a - b);
+    return angles[Math.floor(angles.length / 2)] ?? 0;
+  })();
+  let latticeDegenerateFlag = false;
+  const llmOnlyAll = lines.filter((ln) => ln.cleanChars.length >= 2 && !coveredByInventory(ln));
+  // ORIENTATION-DISAGREEMENT GUARD: when the fragment lattice is degenerate
+  // (diagonal strips read as rows — every axisFromBox angle 0) but the LLM
+  // lines claim the opposite direction, any seat we compute is fabricated.
+  // Honest behavior: all LLM-only lines loose; the ladder routes to vector.
+  const vClaims = llmOnlyAll.filter((ln) => ln.dir === "v").length;
+  const hClaims = llmOnlyAll.length - vClaims;
+  latticeDegenerateFlag = llmOnlyAll.length > 0 && (
+    (vClaims > hClaims && Math.abs(medianFragmentAngle) <= 25) ||
+    (hClaims > vClaims && Math.abs(medianFragmentAngle) >= 65)
+  );
+  const llmOnly = latticeDegenerateFlag ? [] : llmOnlyAll;
   const dropped: { n: number; text: string }[] = [];
   if (outLines.length && llmOnly.length) {
     const angles = outLines.map((l) => l.angle!).sort((a, b) => a - b);
@@ -419,7 +442,7 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
     }
   }
 
-  return { lines: outLines, droppedLines: dropped };
+  return { lines: outLines, droppedLines: dropped, latticeDegenerate: latticeDegenerateFlag || undefined };
 }
 
 
