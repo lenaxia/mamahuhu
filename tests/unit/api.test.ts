@@ -111,11 +111,41 @@ describe("translate (mocked LLM)", () => {
     expect(card.syllables[0][0]).toEqual({ h: "我", py: "wǒ", bpmf: "ㄨㄛˇ" });
   });
 
+  it("surfaces ONLY dictionary-verified chengyu from LLM proposals (fabrications dropped)", async () => {
+    const res = await app.request("/api/ask/translate", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "a long line of people" }),
+    });
+    expect(res.status).toBe(200);
+    const card = await res.json();
+    // mock proposes [大排長龍 (real idiom), 排隊排很長 (real word, not an idiom),
+    // 青紅皂白排排站 (fabrication)] — only the first survives verification
+    expect(card.idioms).toHaveLength(1);
+    expect(card.idioms[0].traditional).toBe("大排長龍");
+    expect(card.idioms[0].pinyin).toContain("pái");
+    expect(card.idioms[0].bpmf.length).toBeGreaterThan(0);
+    expect(card.idioms[0].english.toLowerCase()).toContain("queue");
+    // the plain translation still arrives alongside the idiom
+    expect(card.casual.traditional).toContain("排");
+  });
+
+  it("zh-HK variety: no chengyu cards (idioms are zh-Hant only for now)", async () => {
+    const res = await app.request("/api/ask/translate", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "a long line of people", variety: "zh-HK" }),
+    });
+    expect(res.status).toBe(200);
+    const card = await res.json();
+    expect(card.idioms).toBeUndefined();
+  });
+
   it("rejects empty input", async () => {
     const res = await app.request("/api/ask/translate", {
       method: "POST",
       headers: H,
-      body: JSON.stringify({ text: "  " }),
+      body: JSON.stringify({ text: "" }),
     });
     expect(res.status).toBe(400);
   });

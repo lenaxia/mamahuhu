@@ -131,6 +131,21 @@ export function CandidateCard({ word }: { word: RenderedWord }) {
   );
 }
 
+/** Dictionary-verified chengyu the translation model proposed (成語 card). */
+export function ChengyuCard({ word }: { word: RenderedWord }) {
+  const annotations = useAnnotations();
+  const { saved, save } = useSaver("en-translate");
+  const syllables: Syllables = [wordChars(word)];
+  return (
+    <div data-chengyu={word.traditional} className="rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20 p-4 shadow-sm space-y-3">
+      <div className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400">成語 · dictionary match</div>
+      <AnnotatedText syllables={syllables} annotations={annotations} />
+      <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{word.english.split(" / ").slice(0, 3).join("; ")}</p>
+      <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} />
+    </div>
+  );
+}
+
 /** Inline follow-up Q&A about the card above it. */
 export function FollowUpBox({ hanzi, gloss, askId, variety = "zh-Hant" }: { hanzi?: string; gloss?: string; askId?: string; variety?: "zh-Hant" | "zh-HK" }): React.JSX.Element {
   const [q, setQ] = useState("");

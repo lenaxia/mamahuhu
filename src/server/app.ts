@@ -456,6 +456,15 @@ async function buildPhrase(
       })
       .filter((a) => a.ok)
       .map(({ casual, formal }) => ({ casual, formal }));
+    // LLM proposes, dictionary disposes: chengyu candidates are surfaced ONLY
+    // when they are real idiom-tagged CEDICT entries (exact traditional match).
+    // Fabrications and non-idiom words are dropped — never rendered. zh-Hant
+    // only for now (成語 cards carry bpmf annotations, not jyutping).
+    const idioms = canto ? [] : (res.value.idiomCandidates ?? [])
+      .map((t) => dictionary.idioms.get(t.trim()))
+      .filter((w): w is NonNullable<typeof w> => Boolean(w))
+      .slice(0, 3)
+      .map(renderWord);
     const payload = TranslateResSchema.parse({
       source: parsed.data.text,
       understood: res.value.understood,
@@ -467,6 +476,7 @@ async function buildPhrase(
       formalSyllables: res.value.formal.pinyin !== res.value.casual.pinyin ? formal.syllables : undefined,
       alternatives: alternatives.length ? alternatives : undefined,
       lowConfidence: casual.lowConfidence || formal.lowConfidence || undefined,
+      idioms: idioms.length ? idioms : undefined,
     });
     const askId = await recordAsk(sql, user.id, "translate", parsed.data.text, payload);
     payload.askId = askId;

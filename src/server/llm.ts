@@ -135,8 +135,13 @@ const TRANSLATE_SYSTEM = `You translate English into natural, Taiwan-style Tradi
 Return ONLY valid JSON, no prose, matching exactly:
 {"casual":{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"},
  "formal":{"traditional":"…","simplified":"…","pinyin":"…","gloss":"…","note":"…"},
- "alternatives":[{"casual":{…},"formal":{…}}],"understood":"…"}
+ "alternatives":[{"casual":{…},"formal":{…}}],"understood":"…",
+ "idiom_candidates":["…成語…"]}
 Rules:
+- CHENGYU (成語): if the input describes a situation an established 4-character chengyu captures, add up to 3
+  to "idiom_candidates" in TRADITIONAL characters (e.g. "a long line of people" → ["大排長龍"]).
+  Judge by MEANING, not wording — paraphrases count. Omit the field or use [] when none fits;
+  NEVER invent phrases — every proposal must be a real, established idiom. Still translate normally.
 - "understood" is REQUIRED in the JSON: empty string "" for a direct phrase. If the input
   is a QUESTION ABOUT Mandarin (meta-question), fill it with the phrase/situation the user
   actually means, in a few English words — then translate THAT in the normal fields.
@@ -231,7 +236,7 @@ export class LlmTranslationService implements TranslationService {
           })
           .filter((a): a is { casual: CardVariant; formal: CardVariant } => a !== null)
           .slice(0, 3);
-        return { ok: true, value: { casual, formal, alternatives, understood: parsed.data.understood || undefined } };
+        return { ok: true, value: { casual, formal, alternatives, understood: parsed.data.understood || undefined, idiomCandidates: parsed.data.idiom_candidates?.filter(Boolean) } };
       }
       messages.push({ role: "assistant", content: raw.slice(0, 2000) });
       messages.push({ role: "user", content: "That did not match the JSON schema. Return ONLY the corrected JSON object." });
@@ -331,6 +336,25 @@ export class MockTranslationService implements TranslationService {
             gloss: "time for a bath (written standard)", note: "書面語",
           }, "zh-HK"),
           alternatives: [],
+        },
+      };
+    }
+    if (t.includes("long line")) {
+      // chengyu proposal fixture: one real idiom (verified → surfaced), one
+      // real-but-not-idiom word and one fabrication (both dropped by the router)
+      return {
+        ok: true,
+        value: {
+          alternatives: [],
+          casual: completeVariant({
+            traditional: "隊排得很長", simplified: "队排得很长", pinyin: "duì pái de hěn cháng",
+            gloss: "the line is really long", note: "plain rendering",
+          }),
+          formal: completeVariant({
+            traditional: "隊伍排得很長", simplified: "队伍排得很长", pinyin: "duì wǔ pái de hěn cháng",
+            gloss: "the queue is very long", note: "neutral register",
+          }),
+          idiomCandidates: ["大排長龍", "排隊排很長", "青紅皂白排排站"],
         },
       };
     }

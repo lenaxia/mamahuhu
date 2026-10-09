@@ -72,6 +72,16 @@ export const CardVariantSchema = z.object({
 });
 export type CardVariant = z.infer<typeof CardVariantSchema>;
 
+/** dictionary word rendered for the client (pinyin interpreter candidates, 成語 cards) */
+export const RenderedWordSchema = z.object({
+  traditional: z.string(),
+  simplified: z.string(),
+  pinyin: z.string(),
+  bpmf: z.string(),
+  english: z.string(),
+});
+export type RenderedWord = z.infer<typeof RenderedWordSchema>;
+
 export const TranslateReqSchema = z.object({
   text: z.string().trim().min(1).max(300),
   audience: z.string().trim().max(120).optional(),
@@ -102,6 +112,8 @@ export const TranslateResSchema = z.object({
     .max(3)
     .optional(),
   lowConfidence: z.boolean().optional(),
+  /** dictionary-verified chengyu the LLM proposed for this input (成語 cards) */
+  idioms: z.array(RenderedWordSchema).max(3).optional(),
 });
 export type TranslateRes = z.infer<typeof TranslateResSchema>;
 
@@ -144,19 +156,14 @@ export const LlmTranslateSchema = z.object({
     .optional(),
   /** for meta-questions: the extracted phrase/situation the user actually means; "" otherwise */
   understood: z.string().default(""),
+  /** LLM-proposed chengyu (raw traditional strings) — verified against the
+   *  dictionary server-side before anything is surfaced; unverifiable
+   *  proposals are dropped, never rendered */
+  idiom_candidates: z.array(z.string().min(1).max(20)).max(3).optional(),
 });
 export type LlmTranslate = z.infer<typeof LlmTranslateSchema>;
 
 // ---- pinyin interpreter (local dictionary) ----
-
-export const RenderedWordSchema = z.object({
-  traditional: z.string(),
-  simplified: z.string(),
-  pinyin: z.string(),
-  bpmf: z.string(),
-  english: z.string(),
-});
-export type RenderedWord = z.infer<typeof RenderedWordSchema>;
 
 export const InterpretationSchema = z.object({
   traditional: z.string(),

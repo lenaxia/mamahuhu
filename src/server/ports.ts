@@ -46,6 +46,9 @@ export interface TranslateOutcome {
   alternatives: AltSense[];
   /** for meta-questions: the extracted phrase/situation the user actually means */
   understood?: string;
+  /** raw LLM chengyu proposals (traditional strings) — the ROUTER verifies
+   *  these against the dictionary and drops anything unverifiable */
+  idiomCandidates?: string[];
 }
 
 /** EN → ZH translation with both registers + alternative senses (each with registers). Deterministic under mock. */

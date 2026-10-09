@@ -6,7 +6,7 @@ import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { AnnotatedText } from "./AnnotatedText";
 import { Segmented } from "./Segmented";
-import { FollowUpBox } from "./Cards";
+import { FollowUpBox, ChengyuCard } from "./Cards";
 import { CopyButton } from "./CopyButton";
 import { IconCheck, IconPlay } from "./Icons";
 import { useToast } from "./Toast";
@@ -63,7 +63,15 @@ export function ResultCard({ card }: { card: TranslateRes }) {
   }
 
   return (
-    <div data-traditional={variant.traditional} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
+    <div className="space-y-3">
+      {card.idioms && card.idioms.length > 0 && (
+        <div className="space-y-2">
+          {card.idioms.map((w) => (
+            <ChengyuCard key={w.traditional} word={w} />
+          ))}
+        </div>
+      )}
+      <div data-traditional={variant.traditional} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-neutral-400">“{card.source}”</div>
@@ -151,6 +159,7 @@ export function ResultCard({ card }: { card: TranslateRes }) {
         </button>
       </div>
       <FollowUpBox hanzi={variant.traditional} gloss={variant.gloss} variety={variety} />
+      </div>
     </div>
   );
 }

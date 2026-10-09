@@ -7,6 +7,9 @@ export interface Dictionary {
   byTrad: Map<string, DictWord[]>;
   /** simplified-script lookup — posters/print from mainland China are 简体 */
   bySimp: Map<string, DictWord[]>;
+  /** idiom-tagged CEDICT entries (成語) keyed by traditional — the verification
+   *  set for LLM-proposed idioms: only entries in this map may reach a card */
+  idioms: Map<string, DictWord>;
   count: number;
 }
 
@@ -32,9 +35,19 @@ export async function loadDictionary(sql: Sql): Promise<Dictionary> {
     const cur = byTrad.get(w.traditional);
     if (cur) { if (cur.length < 4) cur.push(w); } else byTrad.set(w.traditional, [w]);
   }
-  cached = { index, byTrad, bySimp, count: words.length };
+  cached = { index, byTrad, bySimp, idioms: buildIdiomSet(words), count: words.length };
   console.log(`[dict] ${words.length} entries, index built in ${Date.now() - t0}ms`);
   return cached;
+}
+
+/** CEDICT glosses tag idioms explicitly ("… (idiom) / …"): ~5.8k entries,
+ *  mostly 4-char chengyu. This is the license-clean chengyu verification set. */
+function buildIdiomSet(words: DictWord[]): Map<string, DictWord> {
+  const idioms = new Map<string, DictWord>();
+  for (const w of words) {
+    if (/\(idiom\)/i.test(w.english) && !idioms.has(w.traditional)) idioms.set(w.traditional, w);
+  }
+  return idioms;
 }
 
 async function seedDict(sql: Sql, words: DictWord[]): Promise<void> {

@@ -166,6 +166,20 @@ test("canto: enable both varieties, ask in 粵, jyutping required, save pair", a
   await expect(page.getByText(/書面/).first()).toBeVisible();
 });
 
+test("english idiom surfaces the dictionary-verified chengyu card", async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/rough pinyin/).fill("a long line of people");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  // mock LLM proposes 大排長龍 (real) + 排隊排很長 (not an idiom) + a fabrication;
+  // only the verified one renders, above the plain translation
+  const card = page.locator('[data-chengyu="大排長龍"]');
+  await expect(card).toBeVisible();
+  await expect(card.getByText(/queue/i)).toBeVisible();
+  await expect(page.locator('[data-chengyu]')).toHaveCount(1);
+  await expect(page.locator('[data-traditional^="隊排"]').first()).toBeVisible();
+});
+
 test("english with pinyin-shaped words routes to translation, not dictionary", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("devUser", "route"));
   await page.goto("/");

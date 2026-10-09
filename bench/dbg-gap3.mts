@@ -1,0 +1,10 @@
+import sharp from "sharp";
+import { GatewayOcrService } from "../src/server/llm";
+import { PipelineOcrService } from "../src/server/ocr-pipeline";
+const base = process.env.OPENAI_API_BASE!, key = process.env.OPENAI_API_KEY!;
+const svc = new PipelineOcrService({ detUrl: "http://localhost:8001/det", base, key, model: "default", fallback: new GatewayOcrService({ base, key, model: "default" }) });
+const bytes = await sharp("bench/fixtures/letter-diagonal.jpg").rotate().jpeg({ quality: 88 }).toBuffer();
+const res = await svc.extract(new File([new Uint8Array(bytes)], "p.jpg", { type: "image/jpeg" }));
+const { lines } = (res as { ok: true; value: { lines: { text: string }[] } }).value;
+console.log(`fixture: ${lines.length} lines`);
+for (const l of lines) console.log(`  (${l.text.length}) ${l.text.slice(0, 30)}`);
