@@ -198,3 +198,12 @@ test("english with pinyin-shaped words routes to translation, not dictionary", a
   await expect(page.locator('[data-traditional="我不知道"]').first()).toBeVisible();
   await expect(page.getByText("Translate as English instead").first()).toBeVisible();
 });
+
+test("pinyin interpretation of an idiom is labeled idiom, not dictionary match", async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/rough pinyin/).fill("da pai chang long");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.locator('[data-traditional="大排長龍"]').first();
+  await expect(card).toBeVisible();
+  await expect(card.getByText("idiom", { exact: true })).toBeVisible();
+});

@@ -45,6 +45,7 @@ export interface Interpretation {
   english: string;
   words: RenderedWord[];
   exactEntry: boolean; // whole phrase exists in the dictionary
+  idiom: boolean; // exact entry is a CEDICT idiom (成語)
 }
 
 export interface Entry {

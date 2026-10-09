@@ -165,3 +165,23 @@ describe("tone tiers (owner spec: exact tones first, wrong tones after, never fa
     for (const x of r) expect(x.words.length).toBeLessThanOrEqual(2); // no junk
   });
 });
+
+describe("idiom flag (universal entry-tag rule)", () => {
+  it("marks exact idiom-tagged interpretations as idioms", () => {
+    const idx = buildIndex(loadCedict());
+    const r = interpret(["da", "pai", "chang", "long"], idx);
+    const match = r.find((x) => x.traditional === "大排長龍");
+    expect(match).toBeDefined();
+    expect(match!.exactEntry).toBe(true);
+    expect(match!.idiom).toBe(true);
+  });
+
+  it("plain exact entries are NOT idioms", () => {
+    const idx = buildIndex(loadCedict());
+    const r = interpret(["zhi", "dao"], idx);
+    const match = r.find((x) => x.traditional === "知道");
+    expect(match).toBeDefined();
+    expect(match!.exactEntry).toBe(true);
+    expect(match!.idiom).toBe(false);
+  });
+});

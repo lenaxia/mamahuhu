@@ -97,7 +97,7 @@ export function InterpretationCard({ interp, rank }: { interp: Interpretation; r
     <div data-traditional={interp.traditional} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-xs uppercase tracking-wide text-neutral-400">
-          {interp.exactEntry ? "dictionary match" : rank > 1 ? `guess ${rank}` : "best guess"}
+          {interp.idiom ? "idiom" : interp.exactEntry ? "dictionary match" : rank > 1 ? `guess ${rank}` : "best guess"}
         </div>
       </div>
       <AnnotatedText syllables={syllables} annotations={annotations} />
@@ -138,7 +138,7 @@ export function ChengyuCard({ word }: { word: RenderedWord }) {
   const syllables: Syllables = [wordChars(word)];
   return (
     <div data-chengyu={word.traditional} className="rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20 p-4 shadow-sm space-y-3">
-      <div className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400">成語 · dictionary match</div>
+      <div className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400">成語 · idiom</div>
       <AnnotatedText syllables={syllables} annotations={annotations} />
       <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{word.english.split(" / ").slice(0, 3).join("; ")}</p>
       <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} />

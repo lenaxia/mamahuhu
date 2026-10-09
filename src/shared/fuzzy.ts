@@ -11,6 +11,7 @@ export interface DictIndex {
 
 const MAX_SYL = 8; // longest word (in syllables) the DP considers
 const K = 3; // k-best interpretations
+const IDIOM_TAG = /\(idiom\)/i; // CEDICT gloss marker for 成語 entries
 
 export function buildIndex(words: DictWord[]): DictIndex {
   const byFlat = new Map<string, DictWord[]>();
@@ -218,6 +219,9 @@ export function interpret(input: string[], index: DictIndex, inputTones?: number
         : words.map((w) => w.english.split(" / ")[0]).join("; "),
       words,
       exactEntry: Boolean(exact),
+      // CEDICT tags idioms in the gloss ("… (idiom) / …") — any exact entry
+      // match that carries the tag is an idiom, wherever it renders
+      idiom: Boolean(exact) && IDIOM_TAG.test(exact!.english),
     });
     if (out.length >= K) break;
   }

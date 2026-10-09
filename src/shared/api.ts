@@ -173,6 +173,8 @@ export const InterpretationSchema = z.object({
   english: z.string(),
   words: z.array(RenderedWordSchema),
   exactEntry: z.boolean(),
+  /** exact entry is a CEDICT idiom (成語) — label it "idiom", not "dictionary match" */
+  idiom: z.boolean().default(false),
 });
 export type Interpretation = z.infer<typeof InterpretationSchema>;
 
