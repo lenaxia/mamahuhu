@@ -73,7 +73,7 @@ const cleanNorm = (s: string) => toTraditional(s.replace(/\s+/g, ""));
 function textSimilar(a: string, b: string): number {
   const A = cleanNorm(a), B = cleanNorm(b);
   const shorter = Math.min(A.length, B.length);
-  if (shorter < 4) return 0;
+  if (shorter < 4) return A === B ? 1 : 0; // short columns: exact match IS a duplicate reading
   let hit = 0;
   for (const c of new Set([...A])) hit += Math.min([...A].filter((x) => x === c).length, [...B].filter((x) => x === c).length);
   return hit / shorter;
@@ -340,7 +340,6 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
       if (crosses[i]! - crosses[i - 1]! >= freeThreshold) slots.push((crosses[i]! + crosses[i - 1]!) / 2);
     }
 
-    slots.sort((a, b) => (verticalPage ? a - b : a - b)); // reading order: ascending cross both ways (vertical R→L = ascending in −x cross space; horizontal T→B = ascending y)
     // column start (along axis) from the fragment lines' first-char medians
     const alongOf = (p: [number, number]) => p[0] * ax + p[1] * ay;
     const starts = outLines.map((l) => {
@@ -372,10 +371,12 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
     const maxCross = crossVals ? Math.max(...crossVals) : Infinity;
     const minCross = crossVals ? Math.min(...crossVals) : -Infinity;
     const lastCross = crosses[crosses.length - 1]!;
+    // a supply value that needs clamping is OUTSIDE the lattice — offering it
+    // as a seat pins boxes to the image edge (measured: 40px OOB at the bottom)
     const supply = [...slots];
     for (let i = 1; i <= groups.length; i++) supply.push(lastCross + colGap * i);
     const candidates = supply
-      .map((c) => Math.max(minCross, Math.min(maxCross, c)))
+      .filter((c) => c >= minCross && c <= maxCross)
       .map(centerOf)
       .sort((a, b) => (verticalPage ? (b.x - a.x) : (a.y - b.y))); // reading order
     const seated = new Map<number, { x: number; y: number }>();
