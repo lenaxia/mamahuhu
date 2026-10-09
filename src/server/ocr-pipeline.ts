@@ -128,9 +128,25 @@ export class PipelineOcrService implements OcrService {
       console.warn("[ocr-pipeline] all crop reads empty — falling back");
       return this.cfg.fallback.extract(new File([bytes.slice()], "page.jpg", { type: "image/jpeg" }));
     }
+    // reading order: the whole-page read supplies the ORDER (reading a page
+    // start-to-end is what that call does naturally — measured: salutation
+    // first, 3/3 runs). Text and boxes stay OURS; page lines only permute.
+    // Each quad takes the index of its best-overlap page line; ties keep
+    // geometric order (merged page lines degrade gracefully). Low confidence
+    // → geometric order untouched.
+    let finalLines: OcrLine[] = raw;
+    if (raw.length > 2) {
+      const perm = await this.orderWithImage(bytes, raw);
+      if (perm) {
+        finalLines = perm.map((i) => raw[i]!);
+        console.log("[ocr-pipeline] reading order: reader-confirmed (image + line reads)");
+      } else {
+        console.warn("[ocr-pipeline] reader ordering unavailable — geometric order kept");
+      }
+    }
     // duplicate long lines (overlapping det quads re-reading the same paragraph) — keep first
     const lines: OcrLine[] = [];
-    for (const l of raw) {
+    for (const l of finalLines) {
       const boxOv = (a2?: [number, number, number, number], b2?: [number, number, number, number]) => {
         if (!a2 || !b2) return 0;
         const ix = Math.max(0, Math.min(a2[2], b2[2]) - Math.max(a2[0], b2[0]));
@@ -169,6 +185,48 @@ export class PipelineOcrService implements OcrService {
     const l = Math.max(0, Math.floor(Math.min(...xs) - pad)), t = Math.max(0, Math.floor(Math.min(...ys) - pad));
     const r = Math.min(plan.rw, Math.ceil(Math.max(...xs) + pad)), b = Math.min(plan.rh, Math.ceil(Math.max(...ys) + pad));
     return sharp(buf).extract({ left: l, top: t, width: Math.max(1, r - l), height: Math.max(1, b - t) }).png().toBuffer();
+  }
+
+  /**
+   * Reader-confirmed reading order — ONE call, image + our per-line reads
+   * together: the photo gives visual context, our reads give content anchors
+   * (coordinates alone got echoed back; text alone couldn't be ordered from
+   * garbled fragments; both together anchor the answer). Returns a validated
+   * permutation of OUR indices or null — never positions anything.
+   */
+  private async orderWithImage(bytes: Uint8Array, lines: OcrLine[]): Promise<number[] | null> {
+    try {
+      const meta = await sharp(bytes).metadata();
+      const W = meta.width ?? 1, H = meta.height ?? 1;
+      const small = await sharp(bytes).resize({ width: 900 }).jpeg({ quality: 82 }).toBuffer();
+      const b64 = small.toString("base64");
+      const list = lines.map((l, i) => {
+        const b = l.box!;
+        return `${i + 1}. [${Math.round((b[0] / W) * 100)},${Math.round((b[1] / H) * 100)} → ${Math.round((b[2] / W) * 100)},${Math.round((b[3] / H) * 100)}] ${l.text.slice(0, 20)}`;
+      }).join("\n");
+      const body = JSON.stringify({ model: this.cfg.model, temperature: 0, max_tokens: 300, messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: `The photo contains ${lines.length} text lines, already detected and read:\n${list}\n(coordinates are percent of image; the text after each is its transcription)\n\nReturn ONLY a JSON array of the line NUMBERS in the correct reading order — the order the text is meant to be read (a letter: salutation first, sign-off last; a poster: top-to-bottom). Use each number exactly once.` },
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
+        ],
+      }] });
+      const res = await fetch(`${this.cfg.base}/chat/completions`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
+        body, signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) return null;
+      const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const txt = (j.choices?.[0]?.message?.content ?? "").replace(/```[a-z]*\n?/g, "").trim();
+      const m = txt.match(/\[[\s\S]*\]/);
+      if (!m) return null;
+      const arr = JSON.parse(m[0]) as number[];
+      const seen = new Set<number>();
+      if (arr.length !== lines.length || !arr.every((n) => Number.isInteger(n) && n >= 1 && n <= lines.length && !seen.has(n) && seen.add(n))) return null;
+      return arr.map((n) => n - 1);
+    } catch {
+      return null;
+    }
   }
 
   /** blind crop read with retry/backoff; "" on persistent failure */
