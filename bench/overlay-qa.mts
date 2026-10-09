@@ -6,7 +6,7 @@
 // axis bug), never as a pass/fail gate. bench/ocr-iou.mts is the stable one.
 // Run: npx tsx bench/overlay-qa.mts [fixture,fixture]
 import { readFileSync } from "node:fs";
-import { fuseStructure, parseStructureLines, type ClassicalItem } from "/workspace/src/server/ocr-fusion";
+import { fuseStructure, parseStructureLines, type ClassicalItem } from "../src/server/ocr-fusion";
 
 const CACHE = "/tmp/opencode/fusion-cache";
 const BASE = process.env.OPENAI_API_BASE!;
@@ -32,15 +32,15 @@ async function grade(name: string, ext: string): Promise<void> {
   const W = meta.width!, H = meta.height!;
 
   // anchored lines only, longest first, cap 6 for legibility
-  const anchored = res.lines.filter((l) => l.angle !== null && l.chars.some((c) => c.anchored))
-    .sort((a, b) => b.chars.length - a.chars.length).slice(0, 6);
+  const anchored = res.lines.filter((l: { angle: number | null; chars: { anchored: boolean }[] }) => l.angle !== null && l.chars.some((c: { anchored: boolean }) => c.anchored))
+    .sort((a: { chars: unknown[] }, b: { chars: unknown[] }) => b.chars.length - a.chars.length).slice(0, 6);
   if (!anchored.length) { console.log(`${name}: no anchored lines`); return; }
 
-  const rects = anchored.map((l, i) => {
-    const bs = l.chars.filter((c) => c.anchored && c.box).map((c) => c.box!);
-    const x1 = Math.min(...bs.map((b) => b[0])), y1 = Math.min(...bs.map((b) => b[1]));
-    const x2 = Math.max(...bs.map((b) => b[2])), y2 = Math.max(...bs.map((b) => b[3]));
-    return { i: i + 1, x1, y1, x2, y2, text: l.chars.map((c) => c.char).join(""), anchored: l.chars.filter((c) => c.anchored).length };
+  const rects = anchored.map((l: typeof anchored[number], i: number) => {
+    const bs = l.chars.filter((c: { anchored: boolean; box?: number[] }) => c.anchored && c.box).map((c: { box?: number[] }) => c.box!);
+    const x1 = Math.min(...bs.map((b: number[]) => b[0]!)), y1 = Math.min(...bs.map((b: number[]) => b[1]!));
+    const x2 = Math.max(...bs.map((b: number[]) => b[2]!)), y2 = Math.max(...bs.map((b: number[]) => b[3]!));
+    return { i: i + 1, x1, y1, x2, y2, text: l.chars.map((c: { char: string }) => c.char).join(""), anchored: l.chars.filter((c: { anchored: boolean }) => c.anchored).length };
   });
   const svg = `<svg width="${W}" height="${H}">${rects.map((r) =>
     `<rect x="${r.x1}" y="${r.y1}" width="${r.x2 - r.x1}" height="${r.y2 - r.y1}" fill="none" stroke="#ff2d00" stroke-width="${Math.max(3, Math.round(Math.max(W, H) / 300))}"/>` +
