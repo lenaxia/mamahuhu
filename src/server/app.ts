@@ -417,7 +417,10 @@ async function buildPhrase(
       interpretations: interpret(norm, dictionary.index, tones.length ? tones : undefined),
       candidates: candidates(norm, dictionary.index),
     });
-    await recordAsk(sql, c.get("user").id, "pinyin", parsed.data.text, res);
+    // record only when the pinyin branch was the RESULT (interpretations
+    // shown). A failed probe that falls through to /api/ask/translate must
+    // not leave a second history row for the same ask.
+    if (res.interpretations.length > 0) await recordAsk(sql, c.get("user").id, "pinyin", parsed.data.text, res);
     return c.json(res);
   });
 
