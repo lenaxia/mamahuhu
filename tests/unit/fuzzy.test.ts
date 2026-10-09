@@ -143,3 +143,25 @@ describe("tone-aware interpretation (owner regression: gan3 fu4)", () => {
     expect(r[0]!.words.map((x) => x.traditional)).toContain("知道");
   });
 });
+
+describe("tone tiers (owner spec: exact tones first, wrong tones after, never fake words)", () => {
+  const tiered: DictWord[] = [
+    ...mini,
+    w("馬媽", "马妈", "ma3 ma3", "(synthetic tone-exact rare word)"),
+    w("媽媽", "妈妈", "ma1 ma1", "mom"),
+  ];
+  const tierIndex = buildIndex(tiered);
+
+  it("tone-exact word outranks a MORE COMMON wrong-tone word (tier beats boost)", () => {
+    const r = interpret(["ma", "ma"], tierIndex, [3, 3]);
+    expect(first(r).traditional).toBe("馬媽"); // exact tones win despite 媽媽's common boost
+    expect(r.map((x) => x.traditional)).toContain("媽媽"); // wrong tone still surfaces after
+    expect(r.findIndex((x) => x.traditional === "馬媽")).toBeLessThan(r.findIndex((x) => x.traditional === "媽媽"));
+  });
+
+  it("toneless input: common/frequency readings first, other tones after — never soup", () => {
+    const r = interpret(["ma", "ma"], tierIndex);
+    expect(first(r).traditional).toBe("媽媽"); // primary/common reading first
+    for (const x of r) expect(x.words.length).toBeLessThanOrEqual(2); // no junk
+  });
+});

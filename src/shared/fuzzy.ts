@@ -159,7 +159,7 @@ export function interpret(input: string[], index: DictIndex, inputTones?: number
           const eT = entryTones(e.pyNum);
           for (let k = 0; k < L; k++) {
             const want = tones[i + k], got = eT[k] ?? 0;
-            if (want && got && got !== 5 && want !== got) tonePenalty += 0.5;
+            if (want && got && got !== 5 && want !== got) tonePenalty += 2.0; // hard tier: no boost combination may outrank a tone-exact match
           }
           const score = path.score + L - 0.35 + (e.traditional.length === L ? 0.05 : 0) + boost - tonePenalty - rareSingle;
           const node = { score, words: [...path.words, e] };
@@ -177,6 +177,23 @@ export function interpret(input: string[], index: DictIndex, inputTones?: number
   // per-syllable characters is not a dictionary result
   const paths = dp[n] ?? [];
   const hasRealWordPath = paths.some((p) => p.words.some((w) => [...w.traditional].length > 1));
+  // TONE TIERS: every tone-exact interpretation precedes every wrong-tone one
+  // (typed tones outrank frequency; wrong tones still surface AFTER — typo
+  // forgiveness). Neutral tone (5) entries are wild. Toneless input: one tier.
+  const pathToneMismatch = (p: { words: DictWord[] }): number => {
+    if (!inputTones) return 0;
+    let i = 0, mismatch = 0;
+    for (const w of p.words) {
+      const eT = entryTones(w.pyNum);
+      for (let k = 0; k < eT.length; k++) {
+        const want = tones[i + k], got = eT[k] ?? 0;
+        if (want && got && got !== 5 && want !== got) mismatch++;
+      }
+      i += eT.length;
+    }
+    return mismatch;
+  };
+  paths.sort((a, b) => pathToneMismatch(a) - pathToneMismatch(b) || b.score - a.score);
   const seen = new Set<string>();
   const out: Interpretation[] = [];
   for (const p of paths) {
