@@ -14,7 +14,7 @@
  */
 import sharp from "sharp";
 import type { OcrLine, OcrService, Result } from "./ports";
-import { axisAngle, charCells, charSim, dedupeQuads, expectChars, readingOrder, splitQuad, validateRead, type Quad } from "./ocr-geometry";
+import { axisAngle, axisFlip, charCells, charSim, dedupeQuads, expectChars, readingOrder, splitQuad, validateRead, type Quad } from "./ocr-geometry";
 
 type DetQuad = Quad & { pts: [number, number][] };
 
@@ -49,6 +49,15 @@ export class PipelineOcrService implements OcrService {
       // det-empty: no text the detector can see (synthetic curves etc.) — legacy path
       return this.cfg.fallback.extract(image);
     }
+    try {
+      return await this.pipeline(det, bytes);
+    } catch (e) {
+      console.warn(`[ocr-pipeline] pipeline failure after det (${String(e)}) — falling back`);
+      return this.cfg.fallback.extract(image);
+    }
+  }
+
+  private async pipeline(det: { quads: DetQuad[]; w: number; h: number }, bytes: Uint8Array): Promise<Result<{ lines: OcrLine[]; servedBy?: string }>> {
 
     const ordered = readingOrder(dedupeQuads(det.quads));
     const meta = await sharp(bytes).metadata();
@@ -62,8 +71,10 @@ export class PipelineOcrService implements OcrService {
     }
 
     const reads = new Map<DetQuad, string>();
+    const deadline = Date.now() + 150_000; // bounded read phase — no hour-long requests
     for (const [, members] of clusters) {
-      const angle = axisAngle(members[0]!);
+      if (Date.now() > deadline) { console.warn("[ocr-pipeline] read deadline exceeded — serving partial"); break; }
+      const angle = axisAngle(members[0]!) + (axisFlip(members[0]!) ? 180 : 0); // upright crops regardless of corner order
       const { buf, plan } = await this.rotateFull(bytes, angle);
       const queue = [...members];
       const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
@@ -98,10 +109,22 @@ export class PipelineOcrService implements OcrService {
         });
       });
     }
+    if (raw.length === 0) {
+      // every crop read failed (gateway outage / auth) — det found text; do NOT return empty
+      console.warn("[ocr-pipeline] all crop reads empty — falling back");
+      return this.cfg.fallback.extract(new File([bytes.slice()], "page.jpg", { type: "image/jpeg" }));
+    }
     // duplicate long lines (overlapping det quads re-reading the same paragraph) — keep first
     const lines: OcrLine[] = [];
     for (const l of raw) {
-      if (l.text.length >= 8 && lines.some((k) => charSim(k.text, l.text) >= 0.7)) {
+      const boxOv = (a2?: [number, number, number, number], b2?: [number, number, number, number]) => {
+        if (!a2 || !b2) return 0;
+        const ix = Math.max(0, Math.min(a2[2], b2[2]) - Math.max(a2[0], b2[0]));
+        const iy = Math.max(0, Math.min(a2[3], b2[3]) - Math.max(a2[1], b2[1]));
+        const sm = Math.min((a2[2]-a2[0])*(a2[3]-a2[1]), (b2[2]-b2[0])*(b2[3]-b2[1]));
+        return sm > 0 ? (ix*iy)/sm : 0;
+      };
+      if (l.text.length >= 8 && lines.some((k) => charSim(k.text, l.text) >= 0.85 && boxOv(k.box, l.box) >= 0.3)) {
         console.log(`[ocr-pipeline] duplicate line dropped: "${l.text.slice(0, 16)}…"`);
         continue;
       }
@@ -144,23 +167,25 @@ export class PipelineOcrService implements OcrService {
         { type: "image_url", image_url: { url: `data:image/png;base64,${b64}` } },
       ],
     }];
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await fetch(`${this.cfg.base}/chat/completions`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.key}` },
           body: JSON.stringify({ model: this.cfg.model, temperature: 0, max_tokens: 400, messages }),
-          signal: AbortSignal.timeout(240_000),
+          signal: AbortSignal.timeout(90_000),
         });
         if (res.status === 429 || res.status === 503) {
+          console.warn(`[ocr-pipeline] read 429/503 (attempt ${attempt + 1}) — backing off`);
           await new Promise((r2) => setTimeout(r2, 8000 * (attempt + 1)));
           continue;
         }
-        if (!res.ok) return "";
+        if (!res.ok) { console.warn(`[ocr-pipeline] read failed: ${res.status}`); return ""; }
         const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
         return (j.choices?.[0]?.message?.content ?? "").trim();
-      } catch {
-        if (attempt === 3) return "";
+      } catch (e) {
+        console.warn(`[ocr-pipeline] read error (attempt ${attempt + 1}): ${String(e)}`);
+        if (attempt === 1) return "";
         await new Promise((r2) => setTimeout(r2, 8000 * (attempt + 1)));
       }
     }

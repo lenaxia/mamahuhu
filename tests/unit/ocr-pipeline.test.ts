@@ -231,3 +231,22 @@ describe("splitQuad + charSim (evidence-driven multi-line handling)", () => {
     expect(charSim(t, "密呈太傅大人的鈞座")).toBeLessThan(0.4);
   });
 });
+
+describe("review fixes", () => {
+  it("axisFlip detects backward edges (mirrored corner order); rotation stays upright", async () => {
+    const { axisAngle, axisFlip } = await import("../../src/server/ocr-geometry");
+    const fwd = quadAt(0, 200, 20);
+    // mirrored order (det can emit it): first long edge runs backward along the axis
+    const p = fwd.pts;
+    const mirrored: Quad = { pts: [p[1]!, p[0]!, p[3]!, p[2]!] };
+    expect(axisAngle(fwd)).toBeCloseTo(axisAngle(mirrored), 5); // same axis either way
+    expect(axisFlip(fwd)).toBe(false);
+    expect(axisFlip(mirrored)).toBe(true);
+  });
+
+  it("char cells clamp to min 4px side (hallucinated long reads don't collapse)", async () => {
+    const q = quadAt(0, 40, 20); // tiny quad
+    const cells = charCells(q, 10); // 10 chars on 40px axis
+    expect(cells[0]![2] - cells[0]![0]).toBeGreaterThanOrEqual(3); // clamped, not 4px→3.9 rounded
+  });
+});

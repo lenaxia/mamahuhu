@@ -7,6 +7,7 @@ never LLM). Params: box_thresh (default 0.35), unclip (default 1.6)."""
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 import asyncio
+import threading
 from PIL import Image
 import io
 
@@ -14,7 +15,9 @@ from rapidocr_onnxruntime import RapidOCR
 
 app = FastAPI()
 ocr_engine = RapidOCR()
+_engine_lock = threading.Lock()  # serialize ONNX inference across /ocr and /det
 MAX_SIDE = 1600
+MAX_BODY = 16 * 1024 * 1024
 
 
 @app.get("/healthz")
@@ -27,6 +30,8 @@ async def det(request: Request, box_thresh: float = 0.35, unclip: float = 1.6):
     payload = await request.body()
     if not payload or len(payload) < 10:
         raise HTTPException(status_code=400, detail="image bytes required")
+    if len(payload) > MAX_BODY:
+        raise HTTPException(status_code=413, detail="image too large")
     try:
         im = Image.open(io.BytesIO(payload)).convert("RGB")
     except Exception:
@@ -40,11 +45,14 @@ async def det(request: Request, box_thresh: float = 0.35, unclip: float = 1.6):
     import math
     import numpy as np
     def run_det():
-        return ocr_engine(buf.getvalue(), use_det=True, use_cls=False, use_rec=False,
-                          box_thresh=box_thresh, unclip_ratio=unclip)
+        with _engine_lock:
+            return ocr_engine(buf.getvalue(), use_det=True, use_cls=False, use_rec=False,
+                              box_thresh=box_thresh, unclip_ratio=unclip)
     result, _ = await asyncio.to_thread(run_det)
     quads = []
     for r in result or []:
+        if not r or len(r) != 4:
+            continue  # malformed row — skip rather than emit garbage
         pts = [[p[0] / s, p[1] / s] for p in r]
         xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
         # long-axis angle via PCA of the 4 corners (normalized to [-45,45])
@@ -65,6 +73,8 @@ async def ocr(request: Request):
     payload = await request.body()
     if not payload or len(payload) < 10:
         raise HTTPException(status_code=400, detail="image bytes required")
+    if len(payload) > MAX_BODY:
+        raise HTTPException(status_code=413, detail="image too large")
     try:
         im = Image.open(io.BytesIO(payload)).convert("RGB")
     except Exception:
@@ -75,7 +85,10 @@ async def ocr(request: Request):
         im = im.resize((int(w * s), int(h * s)))
     buf = io.BytesIO()
     im.save(buf, "PNG")
-    result, _ = await asyncio.to_thread(ocr_engine, buf.getvalue())
+    def run_full():
+        with _engine_lock:
+            return ocr_engine(buf.getvalue())
+    result, _ = await asyncio.to_thread(run_full)
     items = []
     for r in result or []:
         box, text, score = r[0], r[1], r[2]

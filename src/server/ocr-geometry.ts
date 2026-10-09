@@ -38,13 +38,20 @@ export function quadAngle(q: Quad): number {
  */
 export function axisAngle(q: Quad): number {
   let a = quadAngle(q);
-  a = ((((a + 90) % 180) + 180) % 180) - 90; // axis → [-90, 90)
+  return ((((a + 90) % 180) + 180) % 180) - 90; // axis → [-90, 90)
+}
+
+/**
+ * True when the quad's longest edge runs BACKWARD along the text axis
+ * (det corner order is arbitrary). Rotating by axisAngle alone leaves such
+ * crops 180° upside-down; callers rotate by axisAngle + (flip ? 180 : 0).
+ */
+export function axisFlip(q: Quad): boolean {
   const bi = longestEdge(q);
   const p0 = q.pts[bi]!, p1 = q.pts[(bi + 1) % 4]!;
   const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
-  if (Math.abs(a) < 45 ? dx < 0 : dy < 0) a += a < 0 ? 180 : -180; // canonical reading direction
-  // re-canonicalize into [-90, 90)
-  return ((((a + 90) % 180) + 180) % 180) - 90;
+  const a = axisAngle(q);
+  return Math.abs(a) < 45 ? dx < 0 : dy < 0;
 }
 
 function edgeLengths(q: Quad): number[] {
@@ -147,7 +154,7 @@ export function charCells(q: Quad, n: number): Box[] {
   const len = Math.hypot(end[0] - start[0], end[1] - start[1]);
   if (len < 1 || n < 1) return [];
   const u: Pt = [(end[0] - start[0]) / len, (end[1] - start[1]) / len];
-  const side = len / n;
+  const side = Math.max(4, len / n); // clamp: hallucinated long reads must not collapse cells to 0px
   const cells: Box[] = [];
   for (let i = 0; i < n; i++) {
     const f = len * ((i + 0.5) / n);

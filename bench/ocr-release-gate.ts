@@ -1,99 +1,46 @@
-// RELEASE GATE — the app-exact seam: the real letter photo through the exact
-// production pipeline, asserted against the owner-confirmed truth baseline.
-// This gate exists because every "verified" claim this session that skipped it
-// was wrong at this layer (duplicate columns hidden behind green counts).
-// Run: npx tsx bench/ocr-release-gate.ts   (needs: ocrvenv, gateway key)
+// RELEASE GATE — pipeline v2, the app-exact seam: the real letter photo through
+// the production service (normalizeImage → det sidecar → rectify → crop reads),
+// asserted against the owner-confirmed traditional truth baseline.
+// Run: npx tsx bench/ocr-release-gate.ts   (needs: local det sidecar on :8001, gateway key)
 import sharp from "sharp";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { fuseAndServe } from "../src/server/ocr-ladder";
-import { parseStructureLines } from "../src/server/ocr-fusion";
+import { readFileSync } from "node:fs";
+import { GatewayOcrService } from "../src/server/llm";
+import { PipelineOcrService } from "../src/server/ocr-pipeline";
 
-const run = promisify(execFile);
-mkdirSync("/tmp/opencode/fusion-cache", { recursive: true });
-const { STRUCTURE_SYSTEM } = await import("../src/server/ocr-ladder");
+const base = process.env.OPENAI_API_BASE!, key = process.env.OPENAI_API_KEY!;
+const detUrl = process.env.OCR_DET_URL ?? "http://localhost:8001/det";
+const svc = new PipelineOcrService({ detUrl, base, key, model: "default", fallback: new GatewayOcrService({ base, key, model: "default" }) });
 
-const truth = JSON.parse(readFileSync("bench/fixtures/ladder/letter-diagonal.truth.json", "utf8")) as {
-  lines: string[]; charCounts: number[]; minLineCount: number; minSimilarity: number;
+const truth = JSON.parse(readFileSync("bench/fixtures/ladder/letter-diagonal.truth-trad.json", "utf8")) as {
+  lines: string[]; charCounts: number[]; minLineCount: number;
 };
+const phrasesTrad = JSON.parse(readFileSync("bench/fixtures/pipeline2/phrases-trad.json", "utf8")) as Record<string, string[]>;
 
-// 1. app-exact input: normalizeImage = EXIF rotate + jpeg q88
-await sharp("bench/fixtures/letter-diagonal.jpg").rotate().jpeg({ quality: 88 }).toFile("/tmp/opencode/rg-norm.jpg");
-// 2. classical at the LADDER's actual max_side (1600)
-const { stdout } = await run("/tmp/opencode/ocrvenv/bin/python", ["-u", "bench/rapid-json.py", "/tmp/opencode/rg-norm.jpg", "1600"], { timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
-const cls = JSON.parse(stdout) as { items: { box: [number, number, number, number]; text: string; score: number }[]; w: number; h: number };
-// 3. structure call on the normalized bytes (what the gateway sees)
-const b64 = readFileSync("/tmp/opencode/rg-norm.jpg").toString("base64");
-const res = await fetch(`${process.env.OPENAI_API_BASE}/chat/completions`, {
-  method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-  body: JSON.stringify({ model: process.env.MODEL_VISION ?? "default", temperature: 0, max_tokens: 4000, messages: [
-    { role: "system", content: STRUCTURE_SYSTEM },
-    { role: "user", content: [
-      { type: "text", text: "Transcribe the Chinese text lines." },
-      { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
-    ] },
-  ] }),
-});
-const raw = ((await res.json()) as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content ?? "";
-writeFileSync("/tmp/opencode/fusion-cache/letter-diagonal.structure.json", raw);
-// 4. the pure routing layer
-const served = fuseAndServe(cls.items, raw, { w: cls.w, h: cls.h });
-
-console.log(`classical items: ${cls.items.length}, structure lines: ${parseStructureLines(raw).length}`);
-if (!served) {
-  // 0.8.9 contract: the letter IS a degenerate lattice on the app-exact path
-  // (4 garbled overlapping strips vs 5 unanchored LLM columns) — fusion must
-  // REFUSE and the ladder routes to the vector rung, which served this photo
-  // through 0.5.x. Vector output quality is gated separately by
-  // bench/ocr-vectors.ts (letter-diagonal: blocks/dupes/known-chars).
-  console.log("PASS: fusion refused (degenerate lattice) → vector rung serves the letter");
-  process.exit(0);
-}
-
-const texts = served.lines.map((l) => l.text);
-const all = texts.join("");
-const A = [...all], B = [...truth.lines.join("")];
-let hit = 0;
-for (const c of new Set(A)) hit += Math.min(A.filter((x) => x === c).length, B.filter((x) => x === c).length);
-const sim = hit / Math.max(1, B.length);
-
-console.log(`\nfused output (${served.lines.length} lines):`);
-for (const t of texts) console.log("  " + t.slice(0, 30));
-
-// DUPLICATE-COLUMN CHECK: no output text may be ≥0.7-similar to another at a
-// different position (the 密呈×2 class of failure)
-const sim2 = (a: string, b: string) => {
-  const x = [...a], y = [...b];
-  let h = 0;
-  for (const c of new Set(x)) h += Math.min(x.filter((v) => v === c).length, y.filter((v) => v === c).length);
-  return h / Math.min(x.length, y.length);
-};
-let dupes = 0;
-for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) {
-  if (sim2(texts[i]!, texts[j]!) >= 0.7) { dupes++; console.log(`  DUPLICATE text: "${texts[i]!.slice(0, 12)}" ≈ "${texts[j]!.slice(0, 12)}"`); }
-}
-// POSITIONAL dupes among INFERRED lines only (the clamp-stacked class —
-// six columns at one identical box). Real adjacent diagonal fragments
-// legitimately have overlapping AABBs, so fragments are not checked here.
-const fused = served as unknown as { lines: { text: string; charBoxes?: [number, number, number, number][] }[] };
-const inferredBoxes = fused.lines
-  .filter((l) => l.charBoxes && !cls.items.some((it) => it.text === l.text))
-  .map((l) => l.charBoxes![0]!);
-for (let i = 0; i < inferredBoxes.length; i++) for (let j = i + 1; j < inferredBoxes.length; j++) {
-  const [a, b] = [inferredBoxes[i]!, inferredBoxes[j]!];
-  const ov = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-  const smaller = Math.min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]));
-  if (smaller > 0 && ov / smaller >= 0.6) { dupes++; console.log(`  DUPLICATE inferred position: [${a}] ≈ [${b}]`); }
-}
+const count = (t: string) => { const m: Record<string, number> = {}; for (const c of t) m[c] = (m[c] ?? 0) + 1; return m; };
+const sim = (a: string, b: string) => { const ca = count(a), cb = count(b); let hit = 0; for (const c in cb) hit += Math.min(ca[c] ?? 0, cb[c] ?? 0); return hit / Math.max(1, [...b].length); };
 
 let fail = 0;
-if (dupes > 0) { console.log(`FAIL: ${dupes} duplicate column pair(s)`); fail++; }
-if (served.lines.length < truth.minLineCount) { console.log(`FAIL: ${served.lines.length} lines < ${truth.minLineCount}`); fail++; }
-const FLOOR = 0.40; // regression floor — the 90% target is pinned in CI (expected-failure); this floor blocks further decay
-if (sim < FLOOR) { console.log(`FAIL: transcription ${(sim * 100).toFixed(0)}% of baseline < ${(FLOOR * 100).toFixed(0)}% regression floor (target ≥${(truth.minSimilarity * 100).toFixed(0)}%)`); fail++; }
-else if (sim < truth.minSimilarity) { console.log(`WARN: transcription ${(sim * 100).toFixed(0)}% of baseline (target ≥90% — the documented structure-quality gap; floor ${(FLOOR * 100).toFixed(0)}%)`); }
-if (served.boxedFraction < 0.5) { console.log(`FAIL: boxed ${served.boxedFraction.toFixed(2)} < 0.5 (rotated pages honestly serve unpositioned lines — floor accounts for this)`); fail++; }
+async function gate(name: string, path: string, phrases: string[], opts: { minLines?: number; floor: number }) {
+  const bytes = await sharp(path).rotate().jpeg({ quality: 88 }).toBuffer();
+  const res = await svc.extract(new File([new Uint8Array(bytes)], "p.jpg", { type: "image/jpeg" }));
+  if (!res.ok) { console.log(`FAIL ${name}: ${res.error}`); fail++; return; }
+  const { lines, servedBy } = res.value as { lines: { text: string; charBoxes?: [number,number,number,number][] }[]; servedBy?: string };
+  console.log(`\n${name}: servedBy=${servedBy} lines=${lines.length}`);
+  for (const l of lines) console.log(`  (${l.text.length}) ${l.text.replace(/\n/g, "⏎").slice(0, 30)}`);
+  const A = lines.map((l) => l.text.replace(/\s+/g, "")).join("");
+  const s = sim(A, phrases.join(""));
+  if (servedBy !== "pipeline2") { console.log(`FAIL ${name}: servedBy=${servedBy} (pipeline2 required)`); fail++; }
+  if (opts.minLines && lines.length < opts.minLines) { console.log(`FAIL ${name}: ${lines.length} < ${opts.minLines} lines`); fail++; }
+  if (s < opts.floor) { console.log(`FAIL ${name}: overlap ${(s * 100).toFixed(0)}% < ${(opts.floor * 100).toFixed(0)}% floor`); fail++; }
+  else console.log(`${name} SCORE: overlap ${(s * 100).toFixed(0)}% (floor ${(opts.floor * 100).toFixed(0)}%)`);
+  // duplicate lines sanity
+  for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++) {
+    const a = lines[i]!.text, b = lines[j]!.text;
+    if (a.length >= 8 && b.length >= 8 && sim(a, b) >= 0.85) { console.log(`FAIL ${name}: duplicate lines ${i}/${j}`); fail++; }
+  }
+}
 
-console.log(fail === 0 ? `\nPASS (similarity ${(sim * 100).toFixed(0)}%, ${served.lines.length} lines, no duplicates)` : `\n${fail} FAILURE(S)`);
+await gate("letter-diagonal", "bench/fixtures/letter-diagonal.jpg", truth.lines, { minLines: 9, floor: 0.60 });
+await gate("poster-flat", "bench/fixtures/poster-flat.jpg", phrasesTrad["poster-flat"]!, { minLines: 12, floor: 0.80 });
+console.log(fail === 0 ? "\nPASS" : `\n${fail} FAILURE(S)`);
 process.exit(fail === 0 ? 0 : 1);
