@@ -12,14 +12,7 @@ import { parseStructureLines } from "../src/server/ocr-fusion";
 
 const run = promisify(execFile);
 mkdirSync("/tmp/opencode/fusion-cache", { recursive: true });
-const { STRUCTURE_SYSTEM } = await import("../src/server/ocr-ladder"); `You are an OCR reader. Transcribe every PHYSICAL line or column of Chinese text, one at a time.
-Return ONLY valid JSON: {"lines":[{"n":1,"text":"…","dir":"h"|"v"}]}
-Rules:
-- Each physical line/column = one entry, numbered sequentially (n:1, n:2, ...)
-- "text": ONLY the characters you read, max 20 per line. If a line is longer, split it.
-- If there's a visible gap within a line (space, seal, stamp), insert ⟪N⟫ where N = gap in char-widths.
-- "dir": "h" horizontal, "v" vertical/near-vertical.
-- Read each line EXACTLY ONCE. Count the lines you see — stop when you've transcribed them all.`;
+const { STRUCTURE_SYSTEM } = await import("../src/server/ocr-ladder");
 
 const truth = JSON.parse(readFileSync("bench/fixtures/ladder/letter-diagonal.truth.json", "utf8")) as {
   lines: string[]; charCounts: number[]; minLineCount: number; minSimilarity: number;
@@ -48,7 +41,15 @@ writeFileSync("/tmp/opencode/fusion-cache/letter-diagonal.structure.json", raw);
 const served = fuseAndServe(cls.items, raw, { w: cls.w, h: cls.h });
 
 console.log(`classical items: ${cls.items.length}, structure lines: ${parseStructureLines(raw).length}`);
-if (!served) { console.log("FAIL: fusion did not serve (vector rung took over)"); process.exit(1); }
+if (!served) {
+  // 0.8.9 contract: the letter IS a degenerate lattice on the app-exact path
+  // (4 garbled overlapping strips vs 5 unanchored LLM columns) — fusion must
+  // REFUSE and the ladder routes to the vector rung, which served this photo
+  // through 0.5.x. Vector output quality is gated separately by
+  // bench/ocr-vectors.ts (letter-diagonal: blocks/dupes/known-chars).
+  console.log("PASS: fusion refused (degenerate lattice) → vector rung serves the letter");
+  process.exit(0);
+}
 
 const texts = served.lines.map((l) => l.text);
 const all = texts.join("");

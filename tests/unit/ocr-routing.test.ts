@@ -42,7 +42,7 @@ const BASELINE: Record<string, Expectation> = {
   // column reading can't cover it ≥90% so classical text stands — same as the
   // 0.5.x classical behavior for this fixture. Text quality here is the open
   // grid-semantics limitation, recorded deliberately.
-  "grid-handwriting": { serves: false }, // degenerate lattice → vector
+  "grid-handwriting": { serves: true, boxed: 0.5, anchored: 0.3, minLines: 3 }, // CTC-garbled text but positioned; text quality is separate from geometry
   "grid-poem-h": { serves: true, boxed: 0.9, anchored: 0.9, minLines: 5, contains: ["月落松風起", "夢回故山林"] },
   // KNOWN LIMITATION: uniform lattices are direction-ambiguous — both readers
   // follow spatial rows; column verses do not appear as lines (gen-grids.py)

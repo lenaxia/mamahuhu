@@ -313,25 +313,22 @@ export function fuseStructure(items: ClassicalItem[], llmLines: StructureLine[],
     }
     return false;
   };
-  const medianFragmentAngle = (() => {
-    const angles = keep.map((f) => {
-      const a = axisFromBox(f.it.box, [...f.it.text].length, "v");
-      return Math.round((Math.atan2(a.uy, a.ux) * 180) / Math.PI);
-    }).sort((a, b) => a - b);
-    return angles[Math.floor(angles.length / 2)] ?? 0;
-  })();
   let latticeDegenerateFlag = false;
   const llmOnlyAll = lines.filter((ln) => ln.cleanChars.length >= 2 && !coveredByInventory(ln));
-  // ORIENTATION-DISAGREEMENT GUARD: when the fragment lattice is degenerate
-  // (diagonal strips read as rows — every axisFromBox angle 0) but the LLM
-  // lines claim the opposite direction, any seat we compute is fabricated.
-  // Honest behavior: all LLM-only lines loose; the ladder routes to vector.
-  const vClaims = llmOnlyAll.filter((ln) => ln.dir === "v").length;
-  const hClaims = llmOnlyAll.length - vClaims;
-  latticeDegenerateFlag = llmOnlyAll.length > 0 && (
-    (vClaims > hClaims && Math.abs(medianFragmentAngle) <= 25) ||
-    (hClaims > vClaims && Math.abs(medianFragmentAngle) >= 65)
-  );
+  // DEGENERATE LATTICE: the fragment inventory cannot represent the page.
+  // TWO signals AND-ed (each alone false-positives on print fixtures):
+  // 1. COUNT DEFICIT — LLM-only lines outnumber classical fragments
+  //    (owner letter: 5 unanchored columns vs 4 garbled strips; posters
+  //    have llmOnly ≪ fragments, so print never trips this)
+  // 2. STRIP OVERLAP — fragment boxes mutually overlap ≥60% of the smaller
+  //    box: diagonal strips crossing columns (letter: 0.80-0.94), not the
+  //    0-overlap clean geometry of seatable LLM-only-column cases
+  // Measured: letter fixture 0.80 / app-exact 0.94; synthetic seat tests 0.
+  let maxOverlap = 0;
+  for (let i = 0; i < keep.length; i++)
+    for (let j = i+1; j < keep.length; j++)
+      maxOverlap = Math.max(maxOverlap, overlapFrac(keep[i]!.it.box, keep[j]!.it.box));
+  latticeDegenerateFlag = llmOnlyAll.length > keep.length && maxOverlap >= 0.6;
   const llmOnly = latticeDegenerateFlag ? [] : llmOnlyAll;
   const dropped: { n: number; text: string }[] = [];
   if (outLines.length && llmOnly.length) {
