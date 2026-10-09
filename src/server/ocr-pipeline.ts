@@ -136,10 +136,43 @@ export class PipelineOcrService implements OcrService {
     // → geometric order untouched.
     let finalLines: OcrLine[] = raw;
     if (raw.length > 2) {
-      const perm = await this.orderWithImage(bytes, raw);
-      if (perm) {
-        finalLines = perm.map((i) => raw[i]!);
+      const ord = await this.orderWithImage(bytes, raw);
+      if (ord) {
+        finalLines = ord.perm.map((i) => raw[i]!);
         console.log("[ocr-pipeline] reading order: reader-confirmed (image + line reads)");
+        // recall gap recovery: reader flags lines det missed; geometry
+        // interpolates the quad from OUR neighbors; the crop read VERIFIES
+        // (blank discarded, duplicate text-deduped). LLM never positions.
+        for (const miss of ord.missing.slice(0, 2)) {
+          if (finalLines.length < 4) break;
+          // between-indices refer to the RAW-numbered list; map through the perm
+          const pos = (rawIdx: number) => ord.perm.indexOf(rawIdx);
+          const i2 = pos(miss.between[0]!), j2 = pos(miss.between[1]!);
+          const synth = this.synthesizeBetween(finalLines, i2, j2);
+          if (!synth) continue;
+          try {
+            const crop = await this.cropQuadOf(bytes, synth);
+            let text = crop ? await this.readCrop(crop) : "";
+            if (text.length === 0 && crop) text = await this.readCrop(crop);
+            text = toTrad(text.trim());
+            if (text.length === 0) { console.log("[ocr-pipeline] gap-recovery read empty — discarded"); continue; }
+            const dup = finalLines.some((k) => k.text.length >= 4 && text.length >= 4 && charSim(k.text, text) >= 0.7);
+            if (dup) { console.log("[ocr-pipeline] gap-recovery read duplicates existing line — discarded"); continue; }
+            const n = [...text].length;
+            const xs = synth.pts.map((p) => p[0]), ys = synth.pts.map((p) => p[1]);
+            const ang = axisAngle(synth);
+            finalLines.push({
+              text,
+              box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] as [number, number, number, number],
+              dir: Math.abs(ang) >= 45 ? ("v" as const) : ("h" as const),
+              angle: Math.round(ang),
+              charBoxes: charCells(synth, n),
+            });
+            console.log(`[ocr-pipeline] gap-recovery: recovered missing line (${n} chars): ${text.slice(0, 20)}`);
+          } catch (e) {
+            console.warn(`[ocr-pipeline] gap-recovery failed: ${String(e)}`);
+          }
+        }
       } else {
         console.warn("[ocr-pipeline] reader ordering unavailable — geometric order kept");
       }
@@ -194,7 +227,7 @@ export class PipelineOcrService implements OcrService {
    * garbled fragments; both together anchor the answer). Returns a validated
    * permutation of OUR indices or null — never positions anything.
    */
-  private async orderWithImage(bytes: Uint8Array, lines: OcrLine[]): Promise<number[] | null> {
+  private async orderWithImage(bytes: Uint8Array, lines: OcrLine[]): Promise<{ perm: number[]; missing: { between: [number, number]; text: string }[] } | null> {
     try {
       const meta = await sharp(bytes).metadata();
       const W = meta.width ?? 1, H = meta.height ?? 1;
@@ -207,7 +240,7 @@ export class PipelineOcrService implements OcrService {
       const body = JSON.stringify({ model: this.cfg.model, temperature: 0, max_tokens: 300, messages: [{
         role: "user",
         content: [
-          { type: "text", text: `The photo contains ${lines.length} text lines, already detected and read:\n${list}\n(coordinates are percent of image; the text after each is its transcription)\n\nReturn ONLY a JSON array of the line NUMBERS in the correct reading order — the order the text is meant to be read (a letter: salutation first, sign-off last; a poster: top-to-bottom). Use each number exactly once.` },
+          { type: "text", text: `The photo contains ${lines.length} text lines, already detected and read:\n${list}\n(coordinates are percent of image; the text after each is its transcription)\n\nReturn ONLY JSON with keys order (array of line numbers in correct reading order — the order the text is meant to be read (a letter: salutation first, sign-off last; a poster: top-to-bottom). ) and missing (array of objects for text lines VISIBLE in the photo but ABSENT from my list, each {between: [a,b] — the listed line numbers it sits between, text: your transcription}; empty array if none). Use each number exactly once.` },
           { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } },
         ],
       }] });
@@ -218,15 +251,56 @@ export class PipelineOcrService implements OcrService {
       if (!res.ok) return null;
       const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
       const txt = (j.choices?.[0]?.message?.content ?? "").replace(/```[a-z]*\n?/g, "").trim();
-      const m = txt.match(/\[[\s\S]*\]/);
+      const om = txt.match(/"order"\s*:\s*(\[[\s\S]*?\])/);
+      const m = om ?? txt.match(/\[[\s\S]*\]/);
       if (!m) return null;
-      const arr = JSON.parse(m[0]) as number[];
+      const arr = JSON.parse(m[1] ?? m[0]) as number[];
       const seen = new Set<number>();
       if (arr.length !== lines.length || !arr.every((n) => Number.isInteger(n) && n >= 1 && n <= lines.length && !seen.has(n) && seen.add(n))) return null;
-      return arr.map((n) => n - 1);
+      const missing: { between: [number, number]; text: string }[] = [];
+      const mm = txt.match(/"missing"\s*:\s*\[[\s\S]*?\]/);
+      if (mm) {
+        try {
+          const parsed = JSON.parse(`{${mm[0]}}`) as { missing?: { between?: number[]; text?: string }[] };
+          for (const m2 of parsed.missing ?? []) {
+            if (m2.between && m2.between.length === 2 && typeof m2.text === "string" && missing.length < 2) {
+              missing.push({ between: [m2.between[0]! - 1, m2.between[1]! - 1], text: m2.text });
+            }
+          }
+        } catch { /* malformed missing block — ignore */ }
+      }
+      return { perm: arr.map((n) => n - 1), missing };
     } catch {
       return null;
     }
+  }
+
+  /** synthesize a quad between two of our lines (vertical: midpoint between the two columns; horizontal: midpoint y) */
+  private synthesizeBetween(lines: OcrLine[], i: number, j: number): Quad | null {
+    if (i < 0 || j < 0 || i >= lines.length || j >= lines.length) return null;
+    const a = lines[i]!, b = lines[j]!;
+    const widths = lines.map((l) => l.box![2] - l.box![0]).sort((x, y) => x - y);
+    const heights = lines.map((l) => l.box![3] - l.box![1]).sort((x, y) => x - y);
+    const medW = widths[Math.floor(widths.length / 2)]!;
+    const medH = heights[Math.floor(heights.length / 2)]!;
+    if (a.dir === "v" && b.dir === "v") {
+      const cx = (a.box![0] + b.box![0]) / 2;
+      const l = cx - medW / 2, r2 = cx + medW / 2;
+      const top = Math.min(a.box![1], b.box![1]);
+      const bot = Math.max(a.box![3], b.box![3]);
+      return { pts: [[l, top], [r2, top], [r2, bot], [l, bot]] };
+    }
+    const cy = (a.box![1] + b.box![1]) / 2;
+    const t = cy - medH / 2, b2 = cy + medH / 2;
+    const l = Math.min(a.box![0], b.box![0]), r2 = Math.max(a.box![2], b.box![2]);
+    return { pts: [[l, t], [r2, t], [r2, b2], [l, b2]] };
+  }
+
+  /** crop a synthetic quad through the standard rotation path */
+  private async cropQuadOf(bytes: Uint8Array, q: Quad): Promise<Buffer | null> {
+    const angle = axisAngle(q) + (axisFlip(q) ? 180 : 0);
+    const { buf, plan } = await this.rotateFull(bytes, angle);
+    return this.cropQuad(buf, plan, q as DetQuad);
   }
 
   /** blind crop read with retry/backoff; "" on persistent failure */

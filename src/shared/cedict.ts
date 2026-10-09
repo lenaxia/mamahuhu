@@ -38,6 +38,16 @@ export function toTraditional(text: string): string {
   return [...text].map((c) => simpToTrad(c)).join("");
 }
 
+import extra from "./dict-extra.json";
+
+/** Domain supplements: classical/drama vocabulary CEDICT lacks (measured: 太傅/鈞座/卑職 missing → per-char fallback in the word list). */
+export function loadExtraDict(): DictWord[] {
+  return (extra as { traditional: string; simplified: string; pinyin: string; english: string }[]).map((e) => {
+    const pyNum = e.pinyin.toLowerCase();
+    return { traditional: e.traditional, simplified: e.simplified, pyNum, pyFlat: flatOf(pyNum), english: e.english };
+  });
+}
+
 /** Loads CC-CEDICT from the cedict-json package (bundled data, ~122k entries). */
 export function loadCedict(): DictWord[] {
   const raw = req("cedict-json") as unknown;
@@ -57,5 +67,5 @@ export function loadCedict(): DictWord[] {
       english: english.length > 400 ? english.slice(0, 400) + "…" : english,
     });
   }
-  return out;
+  return [...out, ...loadExtraDict()];
 }
