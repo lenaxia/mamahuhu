@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HistoryDetail, HistoryItem, HanziRes, Interpretation, OcrRes, SttRes, TranslateRes } from "../../shared/api";
 import { api, ApiError } from "../api";
 import { InterpretationCard, HanziWordCard, PhraseCard } from "../components/Cards";
@@ -17,7 +17,7 @@ function ago(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-export function HistoryScreen(): React.JSX.Element {
+export function HistoryScreen({ active = true }: { active?: boolean }): React.JSX.Element {
   const show = useToast().show;
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +37,13 @@ export function HistoryScreen(): React.JSX.Element {
   useEffect(() => {
     void load();
   }, []);
+
+  // keep-alive: new asks made on other tabs appear on return
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current && active) void load();
+    mounted.current = true;
+  }, [active]);
 
   async function clearAll(): Promise<void> {
     if (!confirm("Clear all history? Saved words are kept.")) return;

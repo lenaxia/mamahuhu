@@ -13,7 +13,7 @@ type Front = "en" | "zh";
  *  EN→中文 (recall what to SAY) or 中文→EN (read & recognize).
  *  Tap to check, then Got it / Missed it. Got it spaces the card out;
  *  Missed it brings it back soon. */
-export function ReviewScreen(): React.JSX.Element {
+export function ReviewScreen({ active = true }: { active?: boolean }): React.JSX.Element {
   const annotations = useAnnotations();
   const show = useToast().show;
   const [queue, setQueue] = useState<Entry[]>([]);

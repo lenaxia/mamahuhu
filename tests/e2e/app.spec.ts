@@ -26,7 +26,9 @@ test("dad: onboarding with bpmf, pinyin ask, save", async ({ page }) => {
   await expect(page.getByText("Saved").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Words" }).click();
-  await expect(page.locator('[data-traditional="我不知道"]').first()).toBeVisible();
+  // saved entry appears in the Words list (scoped: the ask card survives tab
+  // switches now, hidden, and also carries data-traditional)
+  await expect(page.locator('[data-tab="words"] [data-traditional="我不知道"]').first()).toBeVisible();
 });
 
 test("mom: english translate with register toggle, save", async ({ page }) => {
@@ -119,9 +121,9 @@ test("history records asks, unsaved included", async ({ page }) => {
   await expect(page.getByText("ㄋㄧˇ").first()).toBeVisible();
 
   await page.getByRole("button", { name: "History" }).click();
-  await expect(page.getByText("nihao")).toBeVisible();
+  await expect(page.locator('[data-tab="history"]').getByText("nihao")).toBeVisible();
   await page.locator('[data-history-item="pinyin"]').first().click();
-  await expect(page.getByText("dictionary match").first()).toBeVisible();
+  await expect(page.locator('[data-tab="history"]').getByText("dictionary match").first()).toBeVisible();
 });
 
 test("canto: enable both varieties, ask in 粵, jyutping required, save pair", async ({ page }) => {
@@ -161,9 +163,9 @@ test("canto: enable both varieties, ask in 粵, jyutping required, save pair", a
 
   // words list shows the 粵 badge and the 書面 row
   await page.getByRole("button", { name: "Words" }).click();
-  await expect(page.locator('[data-traditional="沖涼喇"]').first()).toBeVisible();
-  await expect(page.getByText("粵").first()).toBeVisible();
-  await expect(page.getByText(/書面/).first()).toBeVisible();
+  await expect(page.locator('[data-tab="words"] [data-traditional="沖涼喇"]').first()).toBeVisible();
+  await expect(page.locator('[data-tab="words"]').getByText("粵").first()).toBeVisible();
+  await expect(page.locator('[data-tab="words"]').getByText(/書面/).first()).toBeVisible();
 });
 
 test("english idiom surfaces the dictionary-verified chengyu card", async ({ page }) => {
@@ -206,4 +208,21 @@ test("pinyin interpretation of an idiom is labeled idiom, not dictionary match",
   const card = page.locator('[data-traditional="大排長龍"]').first();
   await expect(card).toBeVisible();
   await expect(card.getByText("idiom", { exact: true })).toBeVisible();
+});
+
+test("tab state is durable — results survive switching tabs", async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/rough pinyin/).fill("i love you");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator('[data-traditional="我愛你"]')).toBeVisible();
+
+  // leave and come back — the result must still be there (no unmount)
+  await page.getByRole("button", { name: "Words" }).click();
+  await page.getByRole("button", { name: "Ask" }).click();
+  await expect(page.locator('[data-traditional="我愛你"]')).toBeVisible();
+
+  // and the input text survives a round trip too
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "Ask" }).click();
+  await expect(page.locator('[data-traditional="我愛你"]')).toBeVisible();
 });

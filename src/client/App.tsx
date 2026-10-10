@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MeProvider, useMe } from "./state";
 import { initTts } from "./tts";
 import { initStt } from "./stt";
@@ -26,6 +26,22 @@ function Shell(): React.JSX.Element {
   const { me, loading } = useMe();
   const [tab, setTab] = useState<Tab>("ask");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // keep-alive: screens mount on first visit and stay mounted (state, photos,
+  // results survive tab switches for the app instance's lifetime)
+  const [visited, setVisited] = useState<ReadonlySet<Tab>>(new Set(["ask"]));
+  const mainRef = useRef<HTMLElement>(null);
+  const scrollMemo = useRef<Partial<Record<Tab, number>>>({});
+
+  function go(next: Tab): void {
+    if (next === tab) return;
+    scrollMemo.current[tab] = mainRef.current?.scrollTop ?? 0;
+    setTab(next);
+    setVisited((v) => (v.has(next) ? v : new Set(v).add(next)));
+    const y = scrollMemo.current[next] ?? 0;
+    requestAnimationFrame(() => {
+      if (mainRef.current) mainRef.current.scrollTop = y;
+    });
+  }
 
   useEffect(() => {
     void initTts();
@@ -61,23 +77,36 @@ function Shell(): React.JSX.Element {
               retry
             </button>
           </div>
-        ) : tab === "ask" ? (
-          <AskScreen />
-        ) : tab === "words" ? (
-          <WordsScreen />
-        ) : tab === "review" ? (
-          <ReviewScreen />
         ) : (
-          <HistoryScreen />
+          <>
+            <div className={tab === "ask" ? "" : "hidden"}>
+              <AskScreen />
+            </div>
+            {visited.has("words") && (
+              <div data-tab="words" className={tab === "words" ? "" : "hidden"}>
+                <WordsScreen active={tab === "words"} />
+              </div>
+            )}
+            {visited.has("review") && (
+              <div data-tab="review" className={tab === "review" ? "" : "hidden"}>
+                <ReviewScreen active={tab === "review"} />
+              </div>
+            )}
+            {visited.has("history") && (
+              <div data-tab="history" className={tab === "history" ? "" : "hidden"}>
+                <HistoryScreen active={tab === "history"} />
+              </div>
+            )}
+          </>
         )}
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 dark:border-neutral-800 bg-white/90 dark:bg-neutral-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-lg pb-[env(safe-area-inset-bottom)]">
-          <TabButton active={tab === "ask"} onClick={() => setTab("ask")} icon={<IconKeyboard className="h-5 w-5" />} label="Ask" />
-          <TabButton active={tab === "words"} onClick={() => setTab("words")} icon={<IconBook className="h-5 w-5" />} label="Words" />
-          <TabButton active={tab === "review"} onClick={() => setTab("review")} icon={<IconClock className="h-5 w-5" />} label="Review" />
-          <TabButton active={tab === "history"} onClick={() => setTab("history")} icon={<IconClock className="h-5 w-5" />} label="History" />
+          <TabButton active={tab === "ask"} onClick={() => go("ask")} icon={<IconKeyboard className="h-5 w-5" />} label="Ask" />
+          <TabButton active={tab === "words"} onClick={() => go("words")} icon={<IconBook className="h-5 w-5" />} label="Words" />
+          <TabButton active={tab === "review"} onClick={() => go("review")} icon={<IconClock className="h-5 w-5" />} label="Review" />
+          <TabButton active={tab === "history"} onClick={() => go("history")} icon={<IconClock className="h-5 w-5" />} label="History" />
         </div>
       </nav>
 

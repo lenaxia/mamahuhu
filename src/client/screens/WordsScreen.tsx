@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Entry } from "../../shared/api";
 import { api, ApiError } from "../api";
 import { EntryCard } from "../components/EntryCard";
@@ -12,7 +12,7 @@ import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { useToast } from "../components/Toast";
 
-export function WordsScreen(): React.JSX.Element {
+export function WordsScreen({ active = true }: { active?: boolean }): React.JSX.Element {
   const annotations = useAnnotations();
   const show = useToast().show;
   const [scope, setScope] = useState<"mine" | "all">("mine");
@@ -37,6 +37,13 @@ export function WordsScreen(): React.JSX.Element {
     const t = setTimeout(() => void load(scope, q), q ? 250 : 0);
     return () => clearTimeout(t);
   }, [scope, q, load]);
+
+  // keep-alive: lists would go stale otherwise (saves made on other tabs)
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current && active) void load(scope, q);
+    mounted.current = true;
+  }, [active, load, scope, q]);
 
   async function remove(e: Entry): Promise<void> {
     if (!confirm("Delete this word?")) return;
