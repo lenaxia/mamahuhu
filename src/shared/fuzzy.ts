@@ -228,31 +228,41 @@ export function interpret(input: string[], index: DictIndex, inputTones?: number
   return out;
 }
 
-/** Per-syllable character candidates ("words that might match"). */
+/** Per-syllable character candidates ("words that might match").
+ *  Same discipline as interpretations: only frequent characters (the
+ *  OpenSubtitles/common set) — junk homophones (倭 偓 婐 䶑) never appear —
+ *  and chips round-robin across the phrase's syllables instead of the first
+ *  syllable consuming the whole limit. */
 export function candidates(input: string[], index: DictIndex, limit = 8): RenderedWord[] {
-  const out: RenderedWord[] = [];
-  const seen = new Set<string>();
-  const push = (w: DictWord) => {
-    if (seen.has(w.traditional)) return;
-    seen.add(w.traditional);
-    out.push(renderWord(w));
-  };
+  const buckets: DictWord[][] = [];
   for (const t of input) {
     const syls = splitToken(t, index.syllables) ?? [t];
     for (const s of syls) {
-      const direct = index.bySyl.get(s);
-      if (direct) for (const w of direct) push(w);
-      if (out.length >= limit) return out;
-      if (!direct) {
-        // edit distance ≤ 1 against the valid syllable set
-        for (const syl of index.syllables) {
-          if (lev(s, syl) <= 1) {
-            for (const w of index.bySyl.get(syl) ?? []) push(w);
-            if (out.length >= limit) return out;
-          }
+      const bucket: DictWord[] = [];
+      const add = (syl: string) => {
+        for (const w of index.bySyl.get(syl) ?? []) {
+          if ([...w.traditional].length !== 1 || !isFrequent(w.traditional)) continue;
+          if (!bucket.some((b) => b.traditional === w.traditional)) bucket.push(w);
         }
-      }
+      };
+      add(s);
+      if (!index.bySyl.has(s)) for (const syl of index.syllables) if (lev(s, syl) <= 1) add(syl);
+      if (bucket.length) buckets.push(bucket.sort((a, b) => Number(isCommon(b.traditional)) - Number(isCommon(a.traditional))));
     }
+  }
+  const out: RenderedWord[] = [];
+  const seen = new Set<string>();
+  for (let round = 0; out.length < limit; round++) {
+    let added = false;
+    for (const b of buckets) {
+      const w = b[round];
+      if (!w || seen.has(w.traditional)) continue;
+      seen.add(w.traditional);
+      out.push(renderWord(w));
+      added = true;
+      if (out.length >= limit) break;
+    }
+    if (!added) break;
   }
   return out;
 }

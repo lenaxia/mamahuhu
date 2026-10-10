@@ -435,7 +435,7 @@ export function AskScreen(): React.JSX.Element {
         </div>
       )}
 
-      {cands && cands.length > 0 && (
+      {cands && cands.length > 0 && (!interps || interps.length === 0) && (
         <div className="space-y-2">
           <div className="text-xs uppercase tracking-wide text-neutral-400">might match</div>
           <div className="flex flex-wrap gap-2">
