@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { HanziRes, Interpretation, OcrRes, RenderedWord, TranslateRes } from "../../shared/api";
 import { api, ApiError } from "../api";
-import { CandidateCard, HanziWordCard, InterpretationCard, PhraseCard, FullTranslationCard } from "../components/Cards";
+import { HanziWordCard, InterpretationCard, PhraseCard, FullTranslationCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
 import { Segmented } from "../components/Segmented";
 import { OcrView } from "../components/OcrView";
@@ -40,8 +40,6 @@ export function AskScreen(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [translateCard, setTranslateCard] = useState<TranslateRes | null>(null);
   const [interps, setInterps] = useState<Interpretation[] | null>(null);
-  const [cands, setCands] = useState<RenderedWord[] | null>(null);
-  const [selectedCand, setSelectedCand] = useState<RenderedWord | null>(null);
   const [hanziWords, setHanziWords] = useState<HanziRes | null>(null);
   const [forcedTranslate, setForcedTranslate] = useState(false);
   const [savedNow, setSavedNow] = useState<Set<string>>(new Set());
@@ -66,14 +64,12 @@ export function AskScreen(): React.JSX.Element {
   }, [me]);
 
   const anythingActive =
-    Boolean(translateCard || interps || cands || hanziWords || ocrResult || sttResult || listening || spokenText || ocrBusy);
+    Boolean(translateCard || interps || hanziWords || ocrResult || sttResult || listening || spokenText || ocrBusy);
 
   function reset(): void {
     setError(null);
     setTranslateCard(null);
     setInterps(null);
-    setCands(null);
-    setSelectedCand(null);
     setHanziWords(null);
     setForcedTranslate(false);
     setOcrResult(null);
@@ -131,7 +127,6 @@ export function AskScreen(): React.JSX.Element {
     let pinyinOk = false;
     try {
       const p = await api.pinyin(t);
-      setCands(p.candidates);
       if (p.interpretations.length > 0 && !forcedTranslate) {
         setInterps(p.interpretations);
         pinyinOk = true;
@@ -435,27 +430,6 @@ export function AskScreen(): React.JSX.Element {
         </div>
       )}
 
-      {cands && cands.length > 0 && (!interps || interps.length === 0) && (
-        <div className="space-y-2">
-          <div className="text-xs uppercase tracking-wide text-neutral-400">might match</div>
-          <div className="flex flex-wrap gap-2">
-            {cands.map((w) => (
-              <button
-                key={w.traditional + w.pinyin}
-                onClick={() => setSelectedCand(selectedCand === w ? null : w)}
-                className={`hanzi rounded-full border px-3 py-1.5 text-lg transition ${
-                  selectedCand === w
-                    ? "border-amber-500 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300"
-                    : "border-neutral-300 dark:border-neutral-700"
-                }`}
-              >
-                {w.traditional}
-              </button>
-            ))}
-          </div>
-          {selectedCand && <CandidateCard word={selectedCand} />}
-        </div>
-      )}
     </div>
   );
 }

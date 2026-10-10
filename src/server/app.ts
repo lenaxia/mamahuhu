@@ -61,7 +61,7 @@ import {
   UnavailableStt,
   UnavailableTts,
 } from "./llm";
-import { candidates, interpret, normalizePinyinTokened, renderWord, segmentHanzi } from "../shared/fuzzy";
+import { interpret, normalizePinyinTokened, renderWord, segmentHanzi } from "../shared/fuzzy";
 import { makeDefiner } from "./dict";
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
 import { parseImageDims } from "./imageinfo";
@@ -415,7 +415,7 @@ async function buildPhrase(
     for (const t of tokened) for (const tn of t.tones) tones.push(tn);
     const res = PinyinResSchema.parse({
       interpretations: interpret(norm, dictionary.index, tones.length ? tones : undefined),
-      candidates: candidates(norm, dictionary.index),
+      candidates: [], // retired UI; kept in schema for stored-history replay
     });
     // record only when the pinyin branch was the RESULT (interpretations
     // shown). A failed probe that falls through to /api/ask/translate must

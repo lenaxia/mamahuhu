@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildIndex, interpret, candidates, normalizePinyinInput, splitToken } from "../../src/shared/fuzzy";
+import { buildIndex, interpret, normalizePinyinInput, splitToken } from "../../src/shared/fuzzy";
 import { loadCedict, flatOf, type DictWord } from "../../src/shared/cedict";
 
 function w(traditional: string, simplified: string, pyNum: string, english: string): DictWord {
@@ -80,15 +80,6 @@ describe("interpret", () => {
 
   it("returns nothing when a token can't be split", () => {
     expect(interpret(["qqq"], index)).toEqual([]);
-  });
-});
-
-describe("candidates", () => {
-  it("offers per-syllable character matches", () => {
-    const c = candidates(["jiao"], index);
-    const trads = c.map((x) => x.traditional);
-    expect(trads).toContain("腳");
-    expect(trads).toContain("叫");
   });
 });
 

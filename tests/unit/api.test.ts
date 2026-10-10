@@ -79,17 +79,15 @@ describe("pinyin interpreter", () => {
     expect(body.interpretations[0].words.length).toBeGreaterThan(1);
   });
 
-  it("returns candidates when uninterpretable", async () => {
+  it("interprets single syllables; candidates UI is retired (empty)", async () => {
     const res = await app.request("/api/ask/pinyin", {
       method: "POST",
       headers: H,
       body: JSON.stringify({ text: "jiao" }),
     });
     const body = await res.json();
-    expect(body.interpretations.length).toBeGreaterThanOrEqual(0);
-    expect(body.candidates.length).toBeGreaterThan(3);
-    const trads = body.candidates.map((c: { traditional: string }) => c.traditional);
-    expect(trads).toContain("腳");
+    expect(body.interpretations.length).toBeGreaterThanOrEqual(1);
+    expect(body.candidates).toEqual([]);
   });
 });
 

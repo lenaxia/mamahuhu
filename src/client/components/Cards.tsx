@@ -116,21 +116,6 @@ export function InterpretationCard({ interp, rank }: { interp: Interpretation; r
   );
 }
 
-/** Expanded "might match" candidate. */
-export function CandidateCard({ word }: { word: RenderedWord }) {
-  const annotations = useAnnotations();
-  const { saved, save } = useSaver("pinyin");
-  const syllables: Syllables = [wordChars(word)];
-  return (
-    <div className="rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
-      <div className="text-xs uppercase tracking-wide text-neutral-400">might match</div>
-      <AnnotatedText syllables={syllables} annotations={annotations} />
-      <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{word.english.split(" / ").slice(0, 3).join("; ")}</p>
-      <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} />
-    </div>
-  );
-}
-
 /** Dictionary-verified chengyu the translation model proposed (成語 card). */
 export function ChengyuCard({ word }: { word: RenderedWord }) {
   const annotations = useAnnotations();
