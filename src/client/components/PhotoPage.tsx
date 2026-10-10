@@ -29,19 +29,20 @@ export function PhotoPage({
   const imgRef = useRef<HTMLImageElement>(null);
   const lastTap = useRef(0);
 
-  // compute rendered scale robustly: covers cached/already-complete images
+  // compute rendered scale robustly: covers cached/already-complete images.
+  // ResizeObserver (not just window resize): the overlay can arrive while the
+  // tab is hidden (keep-alive) when clientWidth is 0 — it re-measures when
+  // the tab becomes visible again, so chips position correctly on return.
   useEffect(() => {
+    const img = imgRef.current;
+    if (!img) return;
     const compute = () => {
-      const img = imgRef.current;
-      if (img?.clientWidth) setImgScale(img.clientWidth / (w || img.naturalWidth || 1));
+      if (img.clientWidth) setImgScale(img.clientWidth / (w || img.naturalWidth || 1));
     };
     compute();
-    const t = setTimeout(compute, 50);
-    window.addEventListener("resize", compute);
-    return () => {
-      clearTimeout(t);
-      window.removeEventListener("resize", compute);
-    };
+    const ro = new ResizeObserver(compute);
+    ro.observe(img);
+    return () => ro.disconnect();
   }, [photoUrl, w]);
 
   // pan/zoom bounds come from the RENDERED image — the w/h props can be 0

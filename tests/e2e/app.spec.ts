@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { expect, test } from "@playwright/test";
 
 /**
@@ -225,4 +226,20 @@ test("tab state is durable — results survive switching tabs", async ({ page })
   await page.getByRole("button", { name: "History" }).click();
   await page.getByRole("button", { name: "Ask" }).click();
   await expect(page.locator('[data-traditional="我愛你"]')).toBeVisible();
+});
+
+test("ocr overlay renders after browsing away while processing", async ({ page }) => {
+  await page.goto("/");
+  const png = await sharp({ create: { width: 800, height: 600, channels: 3, background: { r: 230, g: 230, b: 40 } } }).png().toBuffer();
+  await page.getByLabel("Attach").setInputFiles({ name: "poster.png", mimeType: "image/png", buffer: png });
+
+  // leave immediately — the OCR result arrives while the tab is hidden
+  await page.getByRole("button", { name: "Words" }).click();
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: "Ask" }).click();
+
+  // image AND overlay chips must both be there (chips require imgScale > 0,
+  // which stayed 0 before the ResizeObserver fix)
+  await expect(page.locator("img[alt=page]")).toBeVisible();
+  await expect(page.locator('[data-ocr-word="小貓"]').first()).toBeVisible();
 });
