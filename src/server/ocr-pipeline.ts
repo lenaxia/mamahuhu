@@ -321,7 +321,7 @@ export class PipelineOcrService implements OcrService {
       // appears in most calls but arrives split or merged in others) — one
       // retry when candidates existed yet none verified. Bounded: clean
       // pages emit no candidates and never retry.
-      let recoveredTotal = 0;
+      const recoveredLines: OcrLine[] = [];
       const meta = await sharp(bytes).metadata();
       const W0 = meta.width ?? 1;
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -357,22 +357,32 @@ export class PipelineOcrService implements OcrService {
         let verified = 0;
         for (const cand of candidates) {
           const recovered = await this.verifyAtBox(bytes, cand.text, cand.box, cand.angle, lines);
-          if (recovered) { lines.push(recovered); verified++; recoveredTotal++; }
+          if (recovered) { lines.push(recovered); verified++; recoveredLines.push(recovered); }
         }
         if (verified > 0) break;
       }
       // reading order: the recovered line(s) were appended — the reader's
       // permutation covers the whole list including them (prod 0.11.6: the
-      // column landed last instead of its slot). Geometric insertion is
-      // unreliable here (fused det AABBs don't track reading order).
-      if (recoveredTotal > 0 && lines.length > 2) {
+      // column landed last instead of its slot). The reader can misplace a
+      // recovered line among overlapping boxes by a slot (prod 0.11.7: one
+      // early) — after permuting, each recovered line is re-inserted by the
+      // LOCAL geometric trend of its direction (RTL/LTR from the majority
+      // of consecutive across-coord deltas of the reader's own order).
+      if (recoveredLines.length > 0 && lines.length > 2) {
         const ord = await this.orderWithImage(bytes, lines);
         if (ord) {
-          const permuted = ord.perm.map((i) => lines[i]!);
-          lines.splice(0, lines.length, ...permuted);
+          lines.splice(0, lines.length, ...ord.perm.map((i) => lines[i]!));
           console.log("[ocr-pipeline] fallback-recovery: reading order re-confirmed with recovered line(s)");
         } else {
-          console.log("[ocr-pipeline] fallback-recovery: re-order unavailable — recovered line stays appended");
+          console.log("[ocr-pipeline] fallback-recovery: re-order unavailable — geometric insertion only");
+        }
+        for (const rec of recoveredLines) {
+          const idx = lines.indexOf(rec);
+          if (idx < 0) continue;
+          lines.splice(idx, 1);
+          const at = this.geometricInsertIndex(lines, rec);
+          lines.splice(at, 0, rec);
+          console.log(`[ocr-pipeline] fallback-recovery: inserted at ${at} by geometric trend`);
         }
       }
     } catch (e) {
@@ -446,6 +456,34 @@ export class PipelineOcrService implements OcrService {
     }
   }
 
+  /** insertion index for a recovered line among the same-direction lines by
+   *  the page's own trend: the majority sign of consecutive across-coord
+   *  deltas (v-lines: x-center — RTL letters trend decreasing; h-lines:
+   *  y-center, increasing). Ambiguous trend → end of the same-dir block. */
+  private geometricInsertIndex(lines: OcrLine[], rec: OcrLine): number {
+    if (!rec.box || !rec.dir) return lines.length;
+    const across = (l: OcrLine) => rec.dir === "v" ? (l.box![0] + l.box![2]) / 2 : (l.box![1] + l.box![3]) / 2;
+    const sameDir = lines.map((l, i) => ({ l, i })).filter((x) => x.l.dir === rec.dir && x.l.box);
+    if (sameDir.length === 0) return lines.length;
+    const coords = sameDir.map((x) => across(x.l));
+    let dec = 0, inc = 0;
+    for (let i = 1; i < coords.length; i++) {
+      if (coords[i]! < coords[i - 1]!) dec++;
+      else if (coords[i]! > coords[i - 1]!) inc++;
+    }
+    const recCoord = across(rec);
+    let target: number;
+    if (dec > inc) {
+      // right-to-left: insert before the first line further left than us
+      target = sameDir.find((x) => across(x.l) < recCoord)?.i ?? sameDir[sameDir.length - 1]!.i + 1;
+    } else if (inc > dec) {
+      target = sameDir.find((x) => across(x.l) > recCoord)?.i ?? sameDir[sameDir.length - 1]!.i + 1;
+    } else {
+      target = sameDir[sameDir.length - 1]!.i + 1;
+    }
+    return Math.min(target, lines.length);
+  }
+
   /** snap a verified recovery quad to the page's line grid: angle → median of
    *  same-direction neighbors (±15° trust band), pitch → their median
    *  chars-per-length, along-axis center → their median. Falls back to the
@@ -461,11 +499,12 @@ export class PipelineOcrService implements OcrService {
     const ang = medAng !== undefined && Math.abs(((medAng - propAng + 540) % 360) - 180) <= 15 ? medAng : propAng;
     const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
     const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-    // across-axis position comes from the proposal; along-axis from neighbors
+    // across-axis position comes from the proposal; the along-axis CENTER is
+    // ALSO the proposal's own (neighbor median sits ~a pitch off for lines
+    // whose extent differs — prod 0.11.7: chips rendered one char high)
     const med = (xs: number[]): number => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] ?? 0; };
-    const neighborCenters = neighbors.map((l) => vertical ? (l.box![1] + l.box![3]) / 2 : (l.box![0] + l.box![2]) / 2);
     const neighborPitches = neighbors.map((l) => (vertical ? l.box![3] - l.box![1] : l.box![2] - l.box![0]) / Math.max(1, [...l.text].length));
-    const alongCenter = neighborCenters.length ? med(neighborCenters) : (vertical ? cy : cx);
+    const alongCenter = vertical ? cy : cx;
     const propLen = (vertical ? (Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1]))) : (Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0]))));
     const pitch = neighborPitches.length ? Math.max(30, med(neighborPitches)) : Math.max(30, propLen / Math.max(1, nChars));
     const halfLen = (pitch * nChars) / 2;
