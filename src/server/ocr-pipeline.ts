@@ -93,10 +93,12 @@ export class PipelineOcrService implements OcrService {
           if (!q) return;
           const crop = await this.cropQuad(buf, plan, q);
           let text = await this.readCrop(crop);
-          if (text.length === 0) {
-            // read variance: model occasionally returns blank for a clean crop — one retry
-            console.log("[ocr-pipeline] empty read — retrying once");
-            text = await this.readCrop(crop);
+          if (text.length === 0 || PipelineOcrService.degenerateRead(text)) {
+            // read variance: model occasionally returns blank or a character
+            // loop for a clean crop — one retry
+            console.log(`[ocr-pipeline] ${text.length === 0 ? "empty" : "degenerate"} read — retrying once`);
+            const retry = await this.readCrop(crop);
+            if (retry.length > 0 && !PipelineOcrService.degenerateRead(retry)) text = retry;
           }
           if (text.length === 0) console.warn(`[ocr-pipeline] read empty after retry: quad at [${q.pts[0]![0]},${q.pts[0]![1]}]`);
           reads.set(q, text);
@@ -562,6 +564,12 @@ export class PipelineOcrService implements OcrService {
     const angle = axisAngle(q) + (axisFlip(q) ? 180 : 0);
     const { buf, plan } = await this.rotateFull(bytes, angle);
     return this.cropQuad(buf, plan, q as DetQuad);
+  }
+
+  /** a read where one char repeats >=5x is a CTC/decode loop, not text
+   *  (measured: 今已明確黎黎黎黎黎黎黎黎黎黎黎黎 destroyed a whole column) */
+  private static degenerateRead(t: string): boolean {
+    return /(.)\1{4,}/u.test(t);
   }
 
   /** blind crop read with retry/backoff; "" on persistent failure */
