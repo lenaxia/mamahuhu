@@ -32,7 +32,6 @@ interface GatewayMsg { role: string; content: string | ({ type: "text"; text: st
 
 export class PipelineOcrService implements OcrService {
   constructor(private cfg: { detUrl: string; base: string; key: string; model: string; fallback: OcrService }) {}
-
   available(): boolean { return true; }
 
   async extract(image: Blob): Promise<Result<{ lines: OcrLine[]; servedBy?: string }>> {
@@ -77,6 +76,8 @@ export class PipelineOcrService implements OcrService {
     }
 
     const reads = new Map<DetQuad, string>();
+    // dominant cluster representative (real quad point order — flip detection
+    // needs it): the cluster with the most members (letter pages: the columns)
     const deadline = Date.now() + 150_000; // bounded read phase — no hour-long requests
     for (const [, members] of clusters) {
       if (Date.now() > deadline) { console.warn("[ocr-pipeline] read deadline exceeded — serving partial"); break; }
@@ -173,6 +174,19 @@ export class PipelineOcrService implements OcrService {
             console.warn(`[ocr-pipeline] gap-recovery failed: ${String(e)}`);
           }
         }
+        // ENUM-VERIFIED GAP RECOVERY (issue #1): the ordering call's missing[]
+        // is blind on dense pages — its own anchor list (garbled fused reads)
+        // hides columns the model would otherwise see, and any resolution we
+        // tried (900→1800px, 300→1500 tokens, neutral framing) stays blind.
+        // The list-free enumeration at full width DOES emit missed columns
+        // (measured on the owner's letter: 確為真品… line appears at 1400px
+        // and 2000px while det has no quad there at any threshold). So:
+        // enum proposes, pixels dispose — a candidate is only served when a
+        // crop of the geometric slot between neighbor columns READS it back,
+        // and phantoms (enum garbles of covered lines) die on the dup-guard
+        // (measured on the diagonal letter fixture: slot reads return the
+        // EXISTING column text and are discarded).
+        await this.enumVerifiedRecovery(bytes, finalLines);
       } else {
         console.warn("[ocr-pipeline] reader ordering unavailable — geometric order kept");
       }
@@ -275,9 +289,125 @@ export class PipelineOcrService implements OcrService {
     }
   }
 
+  /**
+   * Enum-verified gap recovery. Steps (all measured on the issue #1 letter):
+   * 1. list-free enumeration of the whole photo (full width — the 900px
+   *    ordering image is below the legibility threshold of dense pages)
+   * 2. candidates = enum lines (≥6 chars) no served line covers
+   *    (script-normalized char-multiset ≥0.6 — splits of covered lines are
+   *    subsets and match; a missed column shares only formulaic fragments)
+   * 3. verify each candidate against PIXELS: crop the slot between each
+   *    adjacent column pair in the rotated cluster space (true column widths
+   *    there — AABBs of slanted columns overlap in original space) and serve
+   *    the READ only if it matches the candidate and duplicates no line.
+   * The read is ground truth for the text; enum only proposes.
+   */
+  /**
+   * Fallback-verified gap recovery. The whole-image single-pass (vector
+   * contract) is the ONLY reader measured to emit det-missed columns WITH
+   * positions (owner's letter: complete 確為真品 column + box; the anchored
+   * ordering call is blind at every resolution/token budget tested, and
+   * list-free enums fragment or drop it run-to-run). Division of labor:
+   * the vector pass PROPOSES lines with boxes; det's per-crop reads remain
+   * the served base; a proposal is only appended when an independent crop of
+   * its own box READS it back and it duplicates no served line. Phantoms
+   * (the vector pass's garbles point at REAL columns) die on the dup-guard —
+   * measured on the diagonal letter fixture.
+   */
+  private async enumVerifiedRecovery(bytes: Uint8Array, lines: OcrLine[]): Promise<void> {
+    if (lines.length < 4) return;
+    try {
+      const blob = new File([bytes.slice()], "page.jpg", { type: "image/jpeg" });
+      // the whole-image pass is stochastic (measured: the missed column
+      // appears in most calls but arrives split or merged in others) — one
+      // retry when candidates existed yet none verified. Bounded: clean
+      // pages emit no candidates and never retry.
+      let recoveredTotal = 0;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const vec = await this.cfg.fallback.extract(blob);
+        if (!vec.ok) return;
+        const covered = (t: string) => lines.some((l) => l.text.length >= 4 && charSim(l.text, t) >= 0.6);
+        const candidates = vec.value.lines
+          .filter((l) => l.box && [...l.text.replace(/\s+/g, "")].length >= 6)
+          .map((l) => ({ text: toTrad(l.text.replace(/\s+/g, "")), box: l.box!, angle: l.angle ?? 0 }))
+          .filter((l) => !covered(l.text))
+          // longest first: the full missed column outranks its own split tails
+          .sort((a, b) => [...b.text].length - [...a.text].length)
+          .slice(0, 3);
+        if (!candidates.length) return;
+        console.log(`[ocr-pipeline] fallback-recovery (attempt ${attempt + 1}): ${candidates.length} uncovered candidate(s): ${candidates.map((c) => c.text.slice(0, 12)).join(" | ")}`);
+        let verified = 0;
+        for (const cand of candidates) {
+          const recovered = await this.verifyAtBox(bytes, cand.text, cand.box, cand.angle, lines);
+          if (recovered) { lines.push(recovered); verified++; recoveredTotal++; }
+        }
+        if (verified > 0) return;
+      }
+      void recoveredTotal;
+    } catch (e) {
+      console.warn(`[ocr-pipeline] fallback-recovery failed (serving pipeline lines): ${String(e)}`);
+    }
+  }
+
+  /** verify a candidate at its proposed (pixel) box: crop the box with
+   *  padding through the standard rotation path, read it, and serve the READ
+   *  only if it matches the candidate and duplicates no existing line. The
+   *  proposal's geometry and text are both confirmed by pixels or killed. */
+  private async verifyAtBox(bytes: Uint8Array, cand: string, box: [number, number, number, number], angleDeg: number, allLines: OcrLine[]): Promise<OcrLine | null> {
+    const meta = await sharp(bytes).metadata();
+    const W = meta.width ?? 1200, H = meta.height ?? 1600;
+    // A vector box is the AABB of a SLANTED line — its width over-covers the
+    // true column by the slant smear (measured: 941px box for a ~200px
+    // column; cropping it verbatim reads multi-column soup). Narrow the quad
+    // by char pitch (chars stack along the line) and rotate it by the line's
+    // own vector angle so the standard crop path de-slants it.
+    const n = [...cand].length;
+    const boxW = box[2] - box[0], boxH = box[3] - box[1];
+    const vertical = Math.abs(angleDeg) >= 45;
+    const pitch = Math.max(30, (vertical ? boxH : boxW) / Math.max(1, n));
+    const hw = Math.max(24, Math.min(boxW / 2, pitch * 0.9));
+    const hh = Math.max(40, (vertical ? boxH : boxW) / 2);
+    const cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2;
+    const rad = (angleDeg * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const local: [number, number][] = [[-hh, -hw], [hh, -hw], [hh, hw], [-hh, hw]]; // long axis LOCAL-horizontal, then rotated to angleDeg
+    const pts: [number, number][] = local.map(([dx, dy]) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos]);
+    try {
+      const crop = await this.cropQuadOf(bytes, { pts });
+      let text = crop ? await this.readCrop(crop) : "";
+      if (!text && crop) text = await this.readCrop(crop);
+      text = toTrad(text.replace(/\s+/g, ""));
+      if (!text) { console.log("[ocr-pipeline] fallback-recovery box read empty — discarded"); return null; }
+      // verification = containment: ≥75% of the candidate's chars must be
+      // present in the crop read (pixel confirmation of the proposal), and
+      // the read must not be multi-column soup (≤ ~3x the candidate — bleed
+      // at strip ends is normal, wholesale mixing is not). The CANDIDATE is
+      // served (its own duplication was excluded at selection); the read's
+      // tail bleed never reaches the user.
+      const recall = charSim(text, cand); // hits / min-len ≈ containment when read ≥ cand
+      const soup = [...text].length > [...cand].length * 3 + 4;
+      const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+      console.log(`[ocr-pipeline] fallback-recovery box [${Math.round(Math.min(...xs))},${Math.round(Math.min(...ys))},${Math.round(Math.max(...xs))},${Math.round(Math.max(...ys))}]: read "${text.slice(0, 24)}" recall=${recall.toFixed(2)} soup=${soup}`);
+      if (recall < 0.75 || soup) return null;
+      const nRead = [...cand].length;
+      const ang = axisAngle({ pts });
+      console.log(`[ocr-pipeline] fallback-recovery: VERIFIED (${nRead} chars): ${cand.slice(0, 24)}`);
+      void allLines;
+      return {
+        text: cand,
+        box: [Math.round(Math.min(...xs)), Math.round(Math.min(...ys)), Math.round(Math.max(...xs)), Math.round(Math.max(...ys))] as [number, number, number, number],
+        dir: Math.abs(ang) >= 45 ? ("v" as const) : ("h" as const),
+        angle: Math.round(ang),
+        charBoxes: charCells({ pts }, nRead),
+      };
+    } catch (e) {
+      console.warn(`[ocr-pipeline] fallback-recovery box read failed: ${String(e)}`);
+      return null;
+    }
+  }
+
   /** synthesize a quad between two of our lines (vertical: midpoint between the two columns; horizontal: midpoint y) */
-  private synthesizeBetween(lines: OcrLine[], i: number, j: number): Quad | null {
-    if (i < 0 || j < 0 || i >= lines.length || j >= lines.length) return null;
+  private synthesizeBetween(lines: OcrLine[], i: number, j: number): Quad | null {    if (i < 0 || j < 0 || i >= lines.length || j >= lines.length) return null;
     const a = lines[i]!, b = lines[j]!;
     const widths = lines.map((l) => l.box![2] - l.box![0]).sort((x, y) => x - y);
     const heights = lines.map((l) => l.box![3] - l.box![1]).sort((x, y) => x - y);
@@ -361,5 +491,11 @@ export function cropPlan(W: number, H: number, angle: number) {
     const x = p[0] - W / 2, y = p[1] - H / 2;
     return [x * c - y * s + W / 2 + offX, x * s + y * c + H / 2 + offY];
   };
-  return { rotateArg, D, rw: rw + 2 * D, rh: rh + 2 * D, map };
+  // inverse of map (rotate back): measured-gap recovery maps slot quads from
+  // rotated space to original pixel space for the served line box/charCells
+  const inv = (p: [number, number]): [number, number] => {
+    const x = p[0] - W / 2 - offX, y = p[1] - H / 2 - offY;
+    return [x * c + y * s + W / 2, -x * s + y * c + H / 2];
+  };
+  return { rotateArg, D, rw: rw + 2 * D, rh: rh + 2 * D, map, inv };
 }
