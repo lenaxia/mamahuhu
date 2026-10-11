@@ -317,19 +317,37 @@ export class PipelineOcrService implements OcrService {
   private async enumVerifiedRecovery(bytes: Uint8Array, lines: OcrLine[]): Promise<void> {
     if (lines.length < 4) return;
     try {
-      const blob = new File([bytes.slice()], "page.jpg", { type: "image/jpeg" });
       // the whole-image pass is stochastic (measured: the missed column
       // appears in most calls but arrives split or merged in others) — one
       // retry when candidates existed yet none verified. Bounded: clean
       // pages emit no candidates and never retry.
       let recoveredTotal = 0;
+      const meta = await sharp(bytes).metadata();
+      const W0 = meta.width ?? 1;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const vec = await this.cfg.fallback.extract(blob);
+        // attempt 2 re-encodes (width 2600): the same bytes return the same
+        // deterministic answer — a re-encoded image is a genuinely fresh
+        // draw from the stochastic proposer (measured: the missed column
+        // appears in most calls but arrives split/merged in others)
+        const blobBytes = attempt === 0 ? bytes : new Uint8Array(await sharp(bytes).resize({ width: 2600 }).jpeg({ quality: 85 }).toBuffer());
+        const vec = await this.cfg.fallback.extract(new File([blobBytes.slice()], "page.jpg", { type: "image/jpeg" }));
         if (!vec.ok) return;
+        // boxes from the re-encoded attempt are in ITS pixel space — scale
+        // back to the original before any cropping/serving
+        const scale = attempt === 0 ? 1 : W0 / ((await sharp(blobBytes).metadata()).width ?? W0);
+        if (scale !== 1) {
+          for (const l of vec.value.lines) {
+            if (l.box) l.box = [l.box[0] * scale, l.box[1] * scale, l.box[2] * scale, l.box[3] * scale] as [number, number, number, number];
+          }
+        }
         const covered = (t: string) => lines.some((l) => l.text.length >= 4 && charSim(l.text, t) >= 0.6);
         const candidates = vec.value.lines
           .filter((l) => l.box && [...l.text.replace(/\s+/g, "")].length >= 6)
-          .map((l) => ({ text: toTrad(l.text.replace(/\s+/g, "")), box: l.box!, angle: l.angle ?? 0 }))
+          .map((l) => ({
+            text: toTrad(l.text.replace(/\s+/g, "")),
+            box: (scale === 1 ? l.box! : [l.box![0] * scale, l.box![1] * scale, l.box![2] * scale, l.box![3] * scale]) as [number, number, number, number],
+            angle: l.angle ?? 0,
+          }))
           .filter((l) => !covered(l.text))
           // longest first: the full missed column outranks its own split tails
           .sort((a, b) => [...b.text].length - [...a.text].length)
@@ -341,9 +359,22 @@ export class PipelineOcrService implements OcrService {
           const recovered = await this.verifyAtBox(bytes, cand.text, cand.box, cand.angle, lines);
           if (recovered) { lines.push(recovered); verified++; recoveredTotal++; }
         }
-        if (verified > 0) return;
+        if (verified > 0) break;
       }
-      void recoveredTotal;
+      // reading order: the recovered line(s) were appended — the reader's
+      // permutation covers the whole list including them (prod 0.11.6: the
+      // column landed last instead of its slot). Geometric insertion is
+      // unreliable here (fused det AABBs don't track reading order).
+      if (recoveredTotal > 0 && lines.length > 2) {
+        const ord = await this.orderWithImage(bytes, lines);
+        if (ord) {
+          const permuted = ord.perm.map((i) => lines[i]!);
+          lines.splice(0, lines.length, ...permuted);
+          console.log("[ocr-pipeline] fallback-recovery: reading order re-confirmed with recovered line(s)");
+        } else {
+          console.log("[ocr-pipeline] fallback-recovery: re-order unavailable — recovered line stays appended");
+        }
+      }
     } catch (e) {
       console.warn(`[ocr-pipeline] fallback-recovery failed (serving pipeline lines): ${String(e)}`);
     }
@@ -390,20 +421,69 @@ export class PipelineOcrService implements OcrService {
       console.log(`[ocr-pipeline] fallback-recovery box [${Math.round(Math.min(...xs))},${Math.round(Math.min(...ys))},${Math.round(Math.max(...xs))},${Math.round(Math.max(...ys))}]: read "${text.slice(0, 24)}" recall=${recall.toFixed(2)} soup=${soup}`);
       if (recall < 0.75 || soup) return null;
       const nRead = [...cand].length;
-      const ang = axisAngle({ pts });
       console.log(`[ocr-pipeline] fallback-recovery: VERIFIED (${nRead} chars): ${cand.slice(0, 24)}`);
-      void allLines;
+      // SERVED GEOMETRY: the vector box is a coarse proposal — snap it to the
+      // page's own column grid before serving (prod 0.11.6: recovered line
+      // overlapped a neighbor and sat at the vector angle, visibly off).
+      // - angle: the median of same-direction neighbors (±15° trust band)
+      // - pitch: the neighbors' median chars-per-length (vector boxH/n is
+      //   noisy) → quad length = pitch × chars
+      // - across-axis position: the vector box's (that IS the slot);
+      //   along-axis center: the neighbors' median (columns share extent)
+      const served = this.snapToGrid(pts, vertical, nRead, allLines);
+      const sx = served.map((p) => p[0]), sy = served.map((p) => p[1]);
+      const ang = axisAngle({ pts: served });
       return {
         text: cand,
-        box: [Math.round(Math.min(...xs)), Math.round(Math.min(...ys)), Math.round(Math.max(...xs)), Math.round(Math.max(...ys))] as [number, number, number, number],
+        box: [Math.round(Math.min(...sx)), Math.round(Math.min(...sy)), Math.round(Math.max(...sx)), Math.round(Math.max(...sy))] as [number, number, number, number],
         dir: Math.abs(ang) >= 45 ? ("v" as const) : ("h" as const),
         angle: Math.round(ang),
-        charBoxes: charCells({ pts }, nRead),
+        charBoxes: charCells({ pts: served }, nRead),
       };
     } catch (e) {
       console.warn(`[ocr-pipeline] fallback-recovery box read failed: ${String(e)}`);
       return null;
     }
+  }
+
+  /** snap a verified recovery quad to the page's line grid: angle → median of
+   *  same-direction neighbors (±15° trust band), pitch → their median
+   *  chars-per-length, along-axis center → their median. Falls back to the
+   *  proposal quad when no usable neighbors exist. */
+  private snapToGrid(pts: [number, number][], vertical: boolean, nChars: number, allLines: OcrLine[]): [number, number][] {
+    const neighbors = allLines.filter((l) => {
+      if (!l.box || !l.angle || [...l.text].length < 3) return false;
+      return vertical ? Math.abs(l.angle) >= 45 : Math.abs(l.angle) < 45;
+    });
+    const propAng = axisAngle({ pts });
+    const angles = neighbors.map((l) => l.angle as number).sort((a, b) => a - b);
+    const medAng = angles[Math.floor(angles.length / 2)];
+    const ang = medAng !== undefined && Math.abs(((medAng - propAng + 540) % 360) - 180) <= 15 ? medAng : propAng;
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    // across-axis position comes from the proposal; along-axis from neighbors
+    const med = (xs: number[]): number => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] ?? 0; };
+    const neighborCenters = neighbors.map((l) => vertical ? (l.box![1] + l.box![3]) / 2 : (l.box![0] + l.box![2]) / 2);
+    const neighborPitches = neighbors.map((l) => (vertical ? l.box![3] - l.box![1] : l.box![2] - l.box![0]) / Math.max(1, [...l.text].length));
+    const alongCenter = neighborCenters.length ? med(neighborCenters) : (vertical ? cy : cx);
+    const propLen = (vertical ? (Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1]))) : (Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0]))));
+    const pitch = neighborPitches.length ? Math.max(30, med(neighborPitches)) : Math.max(30, propLen / Math.max(1, nChars));
+    const halfLen = (pitch * nChars) / 2;
+    // true column half-width from pitch (the proposal quad's AABB width
+    // carries the slant smear — measured 627px half-width for a ~135px
+    // column, doubling the served box into the neighbor columns)
+    const halfWid = Math.max(20, pitch * 0.7);
+    const rad = (ang * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    // axis unit (along text) and perpendicular unit; across-position from proposal
+    const axis: [number, number] = [cos, sin];
+    const perp: [number, number] = [-sin, cos];
+    const anchor: [number, number] = vertical ? [cx, alongCenter] : [alongCenter, cy];
+    const corners: [number, number][] = [[-halfLen, -halfWid], [halfLen, -halfWid], [halfLen, halfWid], [-halfLen, halfWid]];
+    return corners.map(([a, p]) => [
+      anchor[0] + a * axis[0] + p * perp[0],
+      anchor[1] + a * axis[1] + p * perp[1],
+    ]);
   }
 
   /** synthesize a quad between two of our lines (vertical: midpoint between the two columns; horizontal: midpoint y) */
