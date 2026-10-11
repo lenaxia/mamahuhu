@@ -106,7 +106,7 @@ export interface OcrService {
   available(): boolean;
   /** skew: degrees the image should be rotated CLOCKWISE to make text lines
    *  horizontal (diagonal over-the-shoulder shots); absent when upright */
-  extract(image: Blob): Promise<Result<{ lines: OcrLine[]; skew?: number; servedBy?: string }>>;
+  extract(image: Blob): Promise<Result<{ lines: OcrLine[]; skew?: number; servedBy?: string; recovery?: { proposals: number; verified: number } }>>;
 }
 
 /** Word/phrase lookup against the local dictionary. */

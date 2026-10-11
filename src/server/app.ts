@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync as readFileSyncSync } from "node:fs";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { appendFile, readFile, unlink, writeFile } from "node:fs/promises";
 import { serveStatic } from "@hono/node-server/serve-static";
 import {
   AnnotationsSchema,
@@ -601,6 +601,11 @@ async function buildPhrase(
     const res = await deps.ocr.extract(new File([new Uint8Array(nBytes)], image.name || "page.jpg", { type: "image/jpeg" }));
     if (!res.ok) return c.json({ error: res.error }, 502);
     console.log(`[ocr] servedBy=${res.value.servedBy ?? "gateway"} lines=${res.value.lines.length}`);
+    // recovery over-fit meter: one JSONL line per OCR — how often the
+    // fallback-verified gap recovery fires on photos that aren't the letter
+    if (res.value.recovery) {
+      void appendFile(`${dataDir()}/ocr-recovery.jsonl`, JSON.stringify({ ts: new Date().toISOString(), ...res.value.recovery }) + "\n").catch(() => undefined);
+    }
     const stored = await storePhoto(new Uint8Array(nBytes));
 
 

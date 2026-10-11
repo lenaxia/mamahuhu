@@ -31,10 +31,12 @@ const READ_PROMPT =
 interface GatewayMsg { role: string; content: string | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[] }
 
 export class PipelineOcrService implements OcrService {
+  /** last-call recovery counters (proposed/verified) — the over-fit meter */
+  private lastRecovery = { proposals: 0, verified: 0 };
   constructor(private cfg: { detUrl: string; base: string; key: string; model: string; fallback: OcrService }) {}
   available(): boolean { return true; }
 
-  async extract(image: Blob): Promise<Result<{ lines: OcrLine[]; servedBy?: string }>> {
+  async extract(image: Blob): Promise<Result<{ lines: OcrLine[]; servedBy?: string; recovery?: { proposals: number; verified: number } }>> {
     const bytes = new Uint8Array(await image.arrayBuffer());
     let det: { quads: DetQuad[]; w: number; h: number };
     try {
@@ -62,8 +64,9 @@ export class PipelineOcrService implements OcrService {
     }
   }
 
-  private async pipeline(det: { quads: DetQuad[]; w: number; h: number }, bytes: Uint8Array): Promise<Result<{ lines: OcrLine[]; servedBy?: string }>> {
+  private async pipeline(det: { quads: DetQuad[]; w: number; h: number }, bytes: Uint8Array): Promise<Result<{ lines: OcrLine[]; servedBy?: string; recovery?: { proposals: number; verified: number } }>> {
 
+    this.lastRecovery = { proposals: 0, verified: 0 };
     const ordered = readingOrder(dedupeQuads(det.quads)); // IoU dedupe: adjacent dense rows survive, same-region double-reads die
     const meta = await sharp(bytes).metadata();
     const W = meta.width ?? det.w, H = meta.height ?? det.h;
@@ -208,7 +211,15 @@ export class PipelineOcrService implements OcrService {
       lines.push(l);
     }
 
-    return { ok: true as const, value: { lines, servedBy: "pipeline2" } };
+    const recovery = { ...this.lastRecovery };
+    return {
+      ok: true as const,
+      value: {
+        lines,
+        servedBy: recovery.verified > 0 ? `pipeline2+recovered (${recovery.verified})` : recovery.proposals > 0 ? "pipeline2+phantom" : "pipeline2",
+        recovery: recovery.proposals > 0 ? recovery : undefined,
+      },
+    };
   }
 
   /** rotate the cluster upright once; buffer cached (sharp reorders rotate-before-extend, auto-expands) */
@@ -352,12 +363,13 @@ export class PipelineOcrService implements OcrService {
           // longest first: the full missed column outranks its own split tails
           .sort((a, b) => [...b.text].length - [...a.text].length)
           .slice(0, 3);
+        this.lastRecovery.proposals += candidates.length;
         if (!candidates.length) return;
         console.log(`[ocr-pipeline] fallback-recovery (attempt ${attempt + 1}): ${candidates.length} uncovered candidate(s): ${candidates.map((c) => c.text.slice(0, 12)).join(" | ")}`);
         let verified = 0;
         for (const cand of candidates) {
           const recovered = await this.verifyAtBox(bytes, cand.text, cand.box, cand.angle, lines);
-          if (recovered) { lines.push(recovered); verified++; recoveredLines.push(recovered); }
+          if (recovered) { lines.push(recovered); verified++; recoveredLines.push(recovered); this.lastRecovery.verified++; }
         }
         if (verified > 0) break;
       }
