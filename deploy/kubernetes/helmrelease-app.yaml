@@ -1,0 +1,189 @@
+# Mamahuhu — app + OCR sidecar as Flux HelmReleases (bjw-s app-template),
+# the same shape production runs. Requires the bjw-s HelmRepository in
+# flux-system (repo URL: https://bjw-s.github.io/helm-charts/) — an inline
+# example is commented below if your cluster doesn't have it.
+#
+# Not on Flux? Extract spec.values from each release into a values.yaml and:
+#   helm repo add bjw-s https://bjw-s.github.io/helm-charts/
+#   helm upgrade --install mamahuhu bjw-s/app-template --version 5.2.1 -f values.yaml
+#
+# Prereq (secret with your OpenAI-compatible gateway credentials):
+#   kubectl -n mamahuhu create secret generic mamahuhu \
+#     --from-literal=OPENAI_API_BASE=https://api.openai.com/v1 \
+#     --from-literal=OPENAI_API_KEY=sk-...
+# ---
+# apiVersion: source.toolkit.fluxcd.io/v1
+# kind: HelmRepository
+# metadata:
+#   name: bjw-s
+#   namespace: flux-system
+# spec:
+#   interval: 30m
+#   url: https://bjw-s.github.io/helm-charts/
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &appname mamahuhu
+  namespace: &namespace mamahuhu
+spec:
+  interval: 15m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.2.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    createNamespace: true
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    remediation:
+      retries: 3
+  values:
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+
+    controllers:
+      app:
+        type: deployment
+        strategy: Recreate # sqlite single-writer; do not scale replicas
+        containers:
+          app:
+            # 馬馬虎虎 — family phrasebook: capture (text/photo/speech) → Chinese
+            # with annotations (zhuyin/jyutping), per-user lists, SRS review.
+            # https://github.com/lenaxia/mamahuhu
+            image:
+              repository: ghcr.io/lenaxia/mamahuhu
+              tag: 0.11.11 # tracks releases
+            env:
+              - name: TZ
+                value: Etc/UTC
+              - name: PORT
+                value: "8787"
+              # single storage root: sqlite + photos + tts disk cache (PVC)
+              - name: DATA_DIR
+                value: /data
+              # AUTH: unset (default) = single-user dev mode, no login —
+              # fine behind nothing, NEVER expose publicly like that.
+              # For multi-user behind an auth proxy (Authelia/Authentik/
+              # traefik forward-auth), set:
+              #   TRUST_PROXY_HEADERS: "1"
+              #   AUTH_HEADER: Remote-User        (header your proxy injects)
+              #   AUTH_NAME_HEADER: Remote-Name
+              # LLM gateway (any OpenAI-compatible endpoint)
+              - name: OPENAI_API_BASE
+                valueFrom:
+                  secretKeyRef:
+                    name: mamahuhu
+                    key: OPENAI_API_BASE
+              - name: OPENAI_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: mamahuhu
+                    key: OPENAI_API_KEY
+              # OCR ladder: deterministic RapidOCR first, LLM fallback
+              - name: OCR_LADDER
+                value: "1"
+              # OCR fusion rung: LLM text+structure x classical boxes
+              # (fallback rung inside OCR_LADDER when pipeline2 is off)
+              - name: OCR_FUSION
+                value: "1"
+              # pipeline v2: det quads → rectify → per-crop reads
+              - name: OCR_PIPELINE
+                value: "2"
+              - name: OCR_DET_URL
+                value: http://mamahuhu-ocr.mamahuhu.svc.cluster.local:8000/det
+              - name: OCR_HTTP_URL
+                value: http://mamahuhu-ocr.mamahuhu.svc.cluster.local:8000
+              # models: sensible defaults; override for your gateway
+              - name: MODEL_CHAT
+                value: default
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8787
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  failureThreshold: 5
+                  timeoutSeconds: 10
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8787
+                  initialDelaySeconds: 15
+                  periodSeconds: 15
+                  failureThreshold: 3
+                  timeoutSeconds: 10
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8787
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  failureThreshold: 30
+                  timeoutSeconds: 10
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                memory: 1536Mi
+
+    # dictionary (CEDICT 124k + canto words.hk) loads into RAM at boot
+    # (~300MB); /healthz only answers once listening — probes cover readiness
+    persistence:
+      data:
+        type: persistentVolumeClaim
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        globalMounts:
+          - path: /data
+
+    service:
+      app:
+        controller: app
+        primary: true
+        type: ClusterIP
+        ports:
+          http:
+            port: 8787
+
+    ingress:
+      app:
+        enabled: true
+        className: traefik # or nginx — adjust to your cluster
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-production
+        hosts:
+          - host: &uri mamahuhu.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: app
+                  port: http
+        tls:
+          - hosts:
+              - *uri
+            secretName: *uri

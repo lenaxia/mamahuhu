@@ -1,0 +1,94 @@
+# Mamahuhu OCR sidecar — RapidOCR (PaddleOCR PP-OCRv4 mobile, ONNX CPU) HTTP
+# service for the OCR ladder/pipeline. Cluster-internal only — no ingress.
+# Same app-template shape as the app release; deploy both in the same
+# namespace so the mamahuhu app's OCR_DET_URL/OCR_HTTP_URL resolve.
+# The image is published as :latest and :<git-sha> (no semver tags) — pin to
+# a sha for reproducibility once you've verified one.
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &appname mamahuhu-ocr
+  namespace: &namespace mamahuhu
+spec:
+  interval: 15m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.2.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    createNamespace: true
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      app:
+        type: deployment
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/lenaxia/mamahuhu-ocr
+              tag: latest
+            env:
+              - name: TZ
+                value: Etc/UTC
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8000
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  failureThreshold: 5
+                  timeoutSeconds: 10
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8000
+                  initialDelaySeconds: 30
+                  periodSeconds: 15
+                  failureThreshold: 3
+                  timeoutSeconds: 10
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8000
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                  failureThreshold: 30
+                  timeoutSeconds: 10
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                memory: 2Gi
+
+    service:
+      app:
+        controller: app
+        primary: true
+        type: ClusterIP
+        ports:
+          http:
+            port: 8000
