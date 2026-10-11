@@ -79,6 +79,15 @@ export class PipelineOcrService implements OcrService {
     }
 
     const reads = new Map<DetQuad, string>();
+    // recovery proposal starts NOW, concurrent with the per-crop reads — its
+    // result doesn't depend on them, only the candidate filtering does
+    // (latency: a full-size vector pass added 24s serial; at w1400 and
+    // overlapped, most of the recovery cost disappears behind existing work)
+    const proposalPromise = (async () => {
+      const small = await sharp(bytes).resize({ width: 1400 }).jpeg({ quality: 82 }).toBuffer();
+      const res = await this.cfg.fallback.extract(new File([new Uint8Array(small)], "proposal.jpg", { type: "image/jpeg" }));
+      return { res, scale: (meta.width ?? W) / (small.length ? (await sharp(small).metadata()).width ?? W : W) };
+    })();
     // dominant cluster representative (real quad point order — flip detection
     // needs it): the cluster with the most members (letter pages: the columns)
     const deadline = Date.now() + 150_000; // bounded read phase — no hour-long requests
@@ -191,7 +200,7 @@ export class PipelineOcrService implements OcrService {
         // and phantoms (enum garbles of covered lines) die on the dup-guard
         // (measured on the diagonal letter fixture: slot reads return the
         // EXISTING column text and are discarded).
-        await this.enumVerifiedRecovery(bytes, finalLines);
+        await this.enumVerifiedRecovery(bytes, finalLines, proposalPromise);
       } else {
         console.warn("[ocr-pipeline] reader ordering unavailable — geometric order kept");
       }
@@ -327,27 +336,32 @@ export class PipelineOcrService implements OcrService {
    * (the vector pass's garbles point at REAL columns) die on the dup-guard —
    * measured on the diagonal letter fixture.
    */
-  private async enumVerifiedRecovery(bytes: Uint8Array, lines: OcrLine[]): Promise<void> {
+  private async enumVerifiedRecovery(bytes: Uint8Array, lines: OcrLine[], proposalPromise: Promise<{ res: Result<{ lines: OcrLine[] }>; scale: number }>): Promise<void> {
     if (lines.length < 4) return;
     try {
-      // the whole-image pass is stochastic (measured: the missed column
-      // appears in most calls but arrives split or merged in others) — one
-      // retry when candidates existed yet none verified. Bounded: clean
-      // pages emit no candidates and never retry.
-      const recoveredLines: OcrLine[] = [];
       const meta = await sharp(bytes).metadata();
       const W0 = meta.width ?? 1;
+      const recoveredLines: OcrLine[] = [];
       for (let attempt = 0; attempt < 2; attempt++) {
-        // attempt 2 re-encodes (width 2600): the same bytes return the same
-        // deterministic answer — a re-encoded image is a genuinely fresh
-        // draw from the stochastic proposer (measured: the missed column
-        // appears in most calls but arrives split/merged in others)
-        const blobBytes = attempt === 0 ? bytes : new Uint8Array(await sharp(bytes).resize({ width: 2600 }).jpeg({ quality: 85 }).toBuffer());
-        const vec = await this.cfg.fallback.extract(new File([blobBytes.slice()], "page.jpg", { type: "image/jpeg" }));
+        // attempt 1 consumes the w1400 proposal pre-flighted during the read
+        // phase; attempt 2 re-encodes (width 2600) — the same bytes return
+        // the same deterministic answer, a re-encode is a fresh draw from
+        // the stochastic proposer (measured: the missed column appears in
+        // most calls but arrives split/merged in others)
+        let vec: { ok: true; value: { lines: OcrLine[] } } | { ok: false; error: string };
+        let scale: number;
+        if (attempt === 0) {
+          const pre = await proposalPromise;
+          vec = pre.res as typeof vec;
+          scale = pre.scale;
+        } else {
+          const blobBytes = new Uint8Array(await sharp(bytes).resize({ width: 2600 }).jpeg({ quality: 85 }).toBuffer());
+          vec = await this.cfg.fallback.extract(new File([blobBytes.slice()], "page.jpg", { type: "image/jpeg" })) as typeof vec;
+          scale = W0 / ((await sharp(blobBytes).metadata()).width ?? W0);
+        }
         if (!vec.ok) return;
-        // boxes from the re-encoded attempt are in ITS pixel space — scale
+        // proposal boxes are in the PROPOSAL image's pixel space — scale
         // back to the original before any cropping/serving
-        const scale = attempt === 0 ? 1 : W0 / ((await sharp(blobBytes).metadata()).width ?? W0);
         if (scale !== 1) {
           for (const l of vec.value.lines) {
             if (l.box) l.box = [l.box[0] * scale, l.box[1] * scale, l.box[2] * scale, l.box[3] * scale] as [number, number, number, number];
