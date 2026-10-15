@@ -253,6 +253,21 @@ describe("hanzi input", () => {
     expect(words[2]!.english.toLowerCase()).toContain("sleep");
   });
 
+  it("dictionary-miss segments become ONE AI-defined card, not repeated chars (清清如我)", async () => {
+    const res = await app.request("/api/ask/hanzi", {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ text: "清清如我" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const words: { traditional: string; known: boolean; english: string; pinyin: string }[] = body.words;
+    expect(words.map((w) => w.traditional)).toEqual(["清清", "如", "我"]);
+    expect(words[0]!.known).toBe(true);
+    expect(words[0]!.english).toContain("AI-defined");
+    expect(words[0]!.english).toContain("clear and pure");
+  });
+
   it("rare characters resolve via Unihan; truly-unlisted chars still mark unknown", async () => {
     // Unihan layer: 𪚥 (zhé) previously unknown — now answerable
     const res = await app.request("/api/ask/hanzi", {

@@ -142,3 +142,23 @@ export function makeDefiner(
     return p;
   };
 }
+
+/** Mock-mode stand-in for makeDefiner: canned fixtures, no network — keeps
+ *  tests hermetic while exercising the same memoization path (清清如我 case). */
+export function makeMockDefiner(
+  fixtures: Record<string, { pinyin: string; english: string }>,
+  dictionary: Dictionary,
+): (word: string) => Promise<DictWord | null> {
+  return async (word) => {
+    const f = fixtures[word];
+    if (!f || dictionary.byTrad.has(word) || dictionary.bySimp.has(word)) return null;
+    const entry: DictWord = {
+      traditional: word, simplified: word,
+      pyNum: f.pinyin, pyFlat: flatOf(f.pinyin),
+      english: `${f.english} (AI-defined)`,
+    };
+    dictionary.byTrad.set(entry.traditional, [entry]);
+    if (!dictionary.bySimp.has(entry.simplified)) dictionary.bySimp.set(entry.simplified, [entry]);
+    return entry;
+  };
+}

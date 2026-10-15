@@ -62,7 +62,7 @@ import {
   UnavailableTts,
 } from "./llm";
 import { interpret, normalizePinyinTokened, renderWord, segmentHanzi } from "../shared/fuzzy";
-import { makeDefiner } from "./dict";
+import { makeDefiner, makeMockDefiner } from "./dict";
 import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
 import { parseImageDims } from "./imageinfo";
 import { toTraditional } from "../shared/cedict";
@@ -328,8 +328,11 @@ export async function makeApp(opts: AppOptions = {}): Promise<{ app: App; deps: 
     : new LlmFollowUpService({ base, key, model: chatModel });
 
   const deps: AppDeps = { sql, dictionary, translations, tts, stt, ocr, describe, tagger, followUp, sources: new Set() };
-  // tier 3: LLM-define unknown words on miss (cached permanently, marked)
-  const defineWord = makeDefiner({ base, key, model: fastModel }, sql, dictionary);
+  // tier 3: LLM-define unknown words on miss (cached permanently, marked);
+  // mock mode swaps in canned fixtures so tests never touch the network
+  const defineWord = mock
+    ? makeMockDefiner({ 清清: { pinyin: "qing1 qing1", english: "clear and pure" } }, dictionary)
+    : makeDefiner({ base, key, model: fastModel }, sql, dictionary);
 
 /** whole-utterance card for multi-word hanzi input: per-word pinyin + LLM phrase gloss */
 async function buildPhrase(
@@ -370,6 +373,20 @@ async function buildPhrase(
     if (!entries?.length) return null;
     const hit = entries.find((e) => !/^(surname|variant of|old variant|see )/i.test(e.english)) ?? entries[0]!;
     return renderWord(hit);
+  };
+
+  /** dictionary-miss pre-pass shared by hanzi/STT/OCR: unknown multi-char
+   *  segments get one LLM definition (memoized in dict_words) so segmentation
+   *  survives dictionary gaps (太傅, 清清如我) instead of decomposing into
+   *  repeated per-char cards whose glosses don't compose. */
+  const defineMisses = async (segs: Iterable<string>): Promise<void> => {
+    let defined = 0;
+    for (const seg of new Set(segs)) {
+      if (defined >= 3) break;
+      if ([...seg].length < 2) continue;
+      if (pickSense(seg)) continue;
+      if (await defineWord(seg)) defined++;
+    }
   };
 
   app.get("/healthz", (c) => c.json({ ok: true, dictEntries: dictionary.count, version: APP_VERSION }));
@@ -493,8 +510,11 @@ async function buildPhrase(
       const hit = pickSense(seg);
       return hit && (hit.traditional === seg || hit.simplified === seg) ? { ...hit, known: true } : null;
     };
+    // dictionary-miss pre-pass: see defineMisses (清清如我 → 清清 kept whole)
+    const segs = segmentHanzi(parsed.data.text);
+    await defineMisses(segs);
     const words: z.infer<typeof HanziWordSchema>[] = [];
-    for (const seg of segmentHanzi(parsed.data.text)) {
+    for (const seg of segs) {
       const direct = lookup(seg);
       if (direct) { words.push(direct); continue; }
       // decompose multi-char segments into dictionary-known characters
@@ -647,18 +667,9 @@ async function buildPhrase(
       .filter((l) => l.from && l.to)
       .map((l) => Math.hypot(l.to![0]! - l.from![0]!, l.to![1]! - l.from![1]!) / Math.max(1, [...l.text].length))
       .sort((a, b) => a - b);
-    // dictionary-miss pre-pass: define up to 3 unknown multi-char words per
-    // photo (segmentation was right; the dictionary lacked the word — 太傅 case)
-    {
-      let defined = 0;
-      const segs = new Set(res.value.lines.flatMap((l) => segmentHanzi(l.text)));
-      for (const seg of segs) {
-        if (defined >= 3) break;
-        if ([...seg].length < 2) continue;
-        if (pickSense(seg)) continue;
-        if (await defineWord(seg)) defined++;
-      }
-    }
+    // dictionary-miss pre-pass (see defineMisses): up to 3 unknown multi-char
+    // words per photo — segmentation was right; the dictionary lacked the word
+    await defineMisses(new Set(res.value.lines.flatMap((l) => segmentHanzi(l.text))));
     const medianPitch = vecPitches.length ? vecPitches[Math.floor(vecPitches.length / 2)]! : 0;
 
     for (const line of res.value.lines) {
@@ -896,6 +907,7 @@ async function buildPhrase(
     };
 
     if (isHan(text)) {
+      await defineMisses(segmentHanzi(text));
       const words = hanziFor(text).words;
       const built = words.length > 1 ? await buildPhrase(text, words) : undefined;
       const hanzi = HanziResSchema.parse({ text, words, phrase: built?.phrase, fullTranslation: built?.fullTranslation });

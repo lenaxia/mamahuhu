@@ -1,13 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import type { HistoryDetail, HistoryItem, HanziRes, Interpretation, OcrRes, SttRes, TranslateRes } from "../../shared/api";
 import { api, ApiError } from "../api";
-import { InterpretationCard, HanziWordCard, PhraseCard } from "../components/Cards";
+import { InterpretationCard, HanziWordCard, PhraseCard, FullTranslationCard } from "../components/Cards";
 import { ResultCard } from "../components/ResultCard";
 import { OcrView } from "../components/OcrView";
 import { Sheet } from "../components/Sheet";
 import { FullScreen } from "../components/FullScreen";
 import { IconCamera, IconKeyboard, IconTrash } from "../components/Icons";
 import { useToast } from "../components/Toast";
+
+/** hanzi ask rendered exactly as on the Ask tab — full translation FIRST
+ *  (the context), then the phrase card, then the individual word cards.
+ *  Word cards alone lose what the ask was about (清清如我 case). */
+function HanziDetail({ res, source }: { res: HanziRes; source: "hanzi" | "stt" }): React.JSX.Element | null {
+  if (!res) return null;
+  return (
+    <>
+      {res.fullTranslation && (
+        <FullTranslationCard text={res.text} english={res.fullTranslation} words={res.words} source={source} />
+      )}
+      {res.phrase && <PhraseCard phrase={res.phrase} words={res.words} source={source} />}
+      {res.phrase && <div className="text-xs uppercase tracking-wide text-neutral-400">words</div>}
+      {(res.words ?? []).map((wd, i) => (
+        <HanziWordCard key={i} word={wd} />
+      ))}
+    </>
+  );
+}
 
 function ago(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -139,8 +158,18 @@ export function HistoryScreen({ active = true }: { active?: boolean }): React.JS
                 ((open.result as { interpretations: Interpretation[] }).interpretations ?? []).map((it, i) => (
                   <InterpretationCard key={i} interp={it} rank={i + 1} />
                 ))}
-              {open.kind === "hanzi" &&
-                ((open.result as HanziRes).words ?? []).map((wd, i) => <HanziWordCard key={i} word={wd} />)}
+              {open.kind === "hanzi" && <HanziDetail res={open.result as HanziRes} source="hanzi" />}
+              {open.kind === "stt" && (() => {
+                const stt = open.result as SttRes;
+                return (
+                  <>
+                    <div className="text-xs uppercase tracking-wide text-neutral-400">heard: “{stt.text}”</div>
+                    {stt.route === "hanzi" && stt.hanzi && <HanziDetail res={stt.hanzi} source="stt" />}
+                    {stt.route === "translate" && stt.translate && <ResultCard card={stt.translate} />}
+                    {stt.route === "text" && <p className="text-sm text-neutral-400">transcript only — no translation available</p>}
+                  </>
+                );
+              })()}
               {open.kind === "ocr" && !open.photoUrl && (
                 <p className="text-sm text-neutral-400">photo no longer stored</p>
               )}
