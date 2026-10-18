@@ -262,6 +262,7 @@ export function OcrView({ ocrResult, photoUrl, w, h }: { ocrResult: OcrRes; phot
         <FullTranslationCard
           text={ocrResult.fullText}
           english={ocrResult.fullTranslation}
+          words={page.lines.flatMap((l) => l.words)}
           source="ocr"
           askId={ocrResult.askId}
         />

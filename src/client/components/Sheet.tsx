@@ -37,7 +37,7 @@ export function Sheet({
   const DRAG_CLOSE = 80; // px of downward pull that commits the dismiss
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-50">
       <div
         className={`absolute inset-0 bg-black/45 transition-opacity duration-200 ${visible ? "opacity-100" : "opacity-0"}`}
         onClick={onClose}

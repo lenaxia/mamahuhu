@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { EntrySource, HanziPhrase, Interpretation, RenderedWord, Syllables } from "../../shared/api";
 import { stripToneMarks } from "../../shared/bpmf";
-import { wordChars } from "../../shared/fuzzy";
+import { segmentHanzi, wordChars } from "../../shared/fuzzy";
 import { api } from "../api";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { AnnotatedText } from "./AnnotatedText";
 import { CopyButton } from "./CopyButton";
 import { IconCheck, IconPlay } from "./Icons";
+import { Sheet } from "./Sheet";
 import { useToast } from "./Toast";
 
 function useSaver(
@@ -247,7 +248,10 @@ export function PhraseCard({
 /** Complete-text card — THE unified element for Chinese input (typed, spoken,
  *  photo): full transcription (original line breaks intact) above the complete
  *  English translation. Identical rendering on every surface; photos add the
- *  overlay + tags above it and a words list below. */
+ *  overlay + tags above it and a words list below.
+ *  Every phrase in the transcription is tappable: its card(s) open in a sheet
+ *  (data from the ask's own words; unknown segments resolve via /api/ask/hanzi,
+ *  which AI-defines dictionary misses — memoized server-side). */
 export function FullTranslationCard({
   text,
   english,
@@ -257,10 +261,11 @@ export function FullTranslationCard({
 }: {
   text: string;
   english: string;
-  words?: RenderedWord[];
+  words?: (RenderedWord & { known?: boolean })[];
   source: EntrySource;
   askId?: string;
 }): React.JSX.Element {
+  const show = useToast().show;
   const { saved, save } = useSaver(source, undefined, askId);
   const asWord: RenderedWord = {
     traditional: text,
@@ -270,6 +275,55 @@ export function FullTranslationCard({
     english,
   };
   const plainSyllables: Syllables = [[...text].filter(isHanChar).map((h) => ({ h, py: "", bpmf: "" }))];
+
+  // tappable transcription: segments resolved by this ask open instantly;
+  // anything else is looked up once and cached for the card's lifetime
+  const resolved = useMemo(() => new Map(words?.map((w) => [w.traditional, w]) ?? []), [words]);
+  const lookedUp = useRef(new Map<string, (RenderedWord & { known: boolean })[]>());
+  const [sheet, setSheet] = useState<{ seg: string; cards: (RenderedWord & { known: boolean })[] } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const tapSeg = async (seg: string): Promise<void> => {
+    const direct = resolved.get(seg);
+    if (direct) { setSheet({ seg, cards: [{ ...direct, known: direct.known ?? true }] }); return; }
+    const cached = lookedUp.current.get(seg);
+    if (cached) { setSheet({ seg, cards: cached }); return; }
+    if (busy) return;
+    setBusy(seg);
+    try {
+      const res = await api.hanzi(seg);
+      const cards = (res.words ?? []).map((w) => ({ ...w, known: w.known ?? false }));
+      lookedUp.current.set(seg, cards);
+      setSheet({ seg, cards });
+    } catch {
+      show("Lookup failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+  // transcription = alternating non-Han runs (verbatim: line breaks intact)
+  // and Han runs segmented into words
+  const runs: React.ReactNode[] = [];
+  for (const m of text.matchAll(/(\P{Script=Han}+)|(\p{Script=Han}+)/gu)) {
+    const [, plain, han] = m;
+    if (plain !== undefined) {
+      runs.push(plain);
+      continue;
+    }
+    for (const seg of segmentHanzi(han!)) {
+      const isBusy = busy === seg;
+      runs.push(
+        <button
+          key={seg + runs.length}
+          type="button"
+          data-tap-word={seg}
+          onClick={() => void tapSeg(seg)}
+          className={`underline decoration-neutral-300 dark:decoration-neutral-600 decoration-dotted underline-offset-4 active:bg-amber-100 dark:active:bg-amber-900/40 rounded transition ${isBusy ? "animate-pulse" : ""}`}
+        >
+          {seg}
+        </button>,
+      );
+    }
+  }
   return (
     <div className="rounded-2xl border-2 border-sky-300 dark:border-sky-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
       <div className="space-y-1.5">
@@ -285,7 +339,8 @@ export function FullTranslationCard({
             >▶</span>
           </span>
         </div>
-        <p lang="zh-Hant" className="hanzi whitespace-pre-line rounded-xl bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2 text-base leading-relaxed">{text}</p>
+        <p lang="zh-Hant" className="hanzi whitespace-pre-line rounded-xl bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2 text-base leading-relaxed">{runs}</p>
+        <p className="text-[10px] uppercase tracking-wide text-neutral-400">tap a phrase for its card</p>
       </div>
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
@@ -295,6 +350,14 @@ export function FullTranslationCard({
         <p className="whitespace-pre-line rounded-xl bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-200">{english}</p>
       </div>
       <ActionRow text={text} saved={saved} onSave={() => void save(asWord, plainSyllables)} />
+      <Sheet open={sheet !== null} onClose={() => setSheet(null)} title={sheet?.seg}>
+        {sheet && sheet.cards.length > 0 && sheet.cards.map((w, i) => (
+          <div key={i} className="mb-2"><HanziWordCard word={w} askId={askId} /></div>
+        ))}
+        {sheet && sheet.cards.length === 0 && (
+          <p className="py-6 text-center text-sm text-neutral-400">no dictionary entry for this phrase</p>
+        )}
+      </Sheet>
     </div>
   );
 }

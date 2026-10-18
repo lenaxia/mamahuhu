@@ -127,6 +127,28 @@ test("history records asks, unsaved included", async ({ page }) => {
   await expect(page.locator('[data-tab="history"]').getByText("dictionary match").first()).toBeVisible();
 });
 
+test("full-translation transcription phrases are tappable → card sheet", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "tapper"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+
+  // typed hanzi: >4 chars so the (mocked) translator keeps the full translation
+  await page.getByPlaceholder(/rough pinyin/).fill("今天我要睡覺");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("full transcription")).toBeVisible();
+  await expect(page.getByText(/MOCK full translation/)).toBeVisible();
+
+  // tap a phrase in the transcription → its card opens in the bottom sheet
+  await page.locator('[data-tap-word="今天"]').click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-traditional="今天"]')).toBeVisible();
+  await page.waitForTimeout(250); // sheet entrance transition
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved").first()).toBeVisible();
+});
+
 test("canto: enable both varieties, ask in 粵, jyutping required, save pair", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("devUser", "canto"));
   await page.goto("/");
