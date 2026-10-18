@@ -317,7 +317,7 @@ export function FullTranslationCard({
           type="button"
           data-tap-word={seg}
           onClick={() => void tapSeg(seg)}
-          className={`mx-0.5 underline decoration-neutral-300 dark:decoration-neutral-600 decoration-dotted underline-offset-4 active:bg-amber-100 dark:active:bg-amber-900/40 rounded transition ${isBusy ? "animate-pulse" : ""}`}
+          className={`mx-0.5 underline decoration-2 decoration-dotted decoration-sky-600 dark:decoration-sky-400 underline-offset-4 active:bg-amber-100 dark:active:bg-amber-900/40 rounded transition ${isBusy ? "animate-pulse" : ""}`}
         >
           {seg}
         </button>,
