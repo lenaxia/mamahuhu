@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync as readFileSyncSync } from "node:fs";
 import { appendFile, readFile, unlink, writeFile } from "node:fs/promises";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -70,6 +71,8 @@ import { annotateJyut, segmentJyut } from "../shared/jyutping";
 import { APP_VERSION } from "./version";
 import type { AskKind } from "../shared/api";
 import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService, DescribeService, TaggingService, FollowUpService } from "./ports";
+
+const requireStrokes = createRequire(import.meta.url);
 
 export type { AppDeps } from "./ports";
 
@@ -394,6 +397,26 @@ async function buildPhrase(
 
   // ---- me ----
   app.get("/api/me", (c) => c.json(meDTO(c.get("user"))));
+
+  // ---- stroke data for writing practice (MakeMeAHanzi via hanzi-writer-data;
+  // rare chars without data 404 → client falls back to free-draw) ----
+  const strokeCache = new Map<string, string | null>();
+  app.get("/api/strokes/:char", (c) => {
+    const ch = c.req.param("char");
+    if ([...ch].length !== 1 || !/\p{Script=Han}/u.test(ch)) return c.json({ error: "not a han character" }, 400);
+    if (!strokeCache.has(ch)) {
+      let json: string | null = null;
+      try {
+        json = readFileSyncSync(requireStrokes.resolve(`hanzi-writer-data/${ch}.json`), "utf8");
+      } catch {
+        strokeCache.set(ch, null);
+      }
+      if (json !== null) strokeCache.set(ch, json);
+    }
+    const json = strokeCache.get(ch);
+    if (json === null || json === undefined) return c.json({ error: "no stroke data" }, 404);
+    return c.body(json, 200, { "content-type": "application/json", "cache-control": "public, max-age=31536000, immutable" });
+  });
 
   app.patch("/api/me", async (c) => {
     const parsed = PatchMeReqSchema.safeParse(await c.req.json().catch(() => null));

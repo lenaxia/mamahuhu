@@ -134,4 +134,7 @@ suggested order of attack.
 
 MIT licensed. Dictionary data is
 [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cedict) (CC BY-SA 4.0)
-via the `cedict-json` package.
+via the `cedict-json` package. Writing-practice stroke data is from
+[MakeMeAHanzi](https://github.com/skishore/makemeahanzi) (Arphic Public
+Licence) via `hanzi-writer-data`; the writing surface is
+[hanzi-writer](https://hanziwriter.org) (MIT).

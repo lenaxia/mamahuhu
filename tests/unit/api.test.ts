@@ -43,6 +43,21 @@ describe("health & identity", () => {
     expect(me.onboarded).toBe(false);
   });
 
+  it("GET /api/strokes/:char serves hanzi-writer data for common chars", async () => {
+    const res = await app.request("/api/strokes/" + encodeURIComponent("我"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toContain("immutable");
+    const d = await res.json();
+    expect(d.strokes.length).toBe(7);
+    expect(Array.isArray(d.medians)).toBe(true);
+  });
+
+  it("GET /api/strokes 404s for chars without data, 400s for non-han", async () => {
+    expect((await app.request("/api/strokes/" + encodeURIComponent("𪚥"))).status).toBe(404);
+    const bad = await app.request("/api/strokes/ab");
+    expect(bad.status).toBe(400);
+  });
+
   it("PATCH /api/me persists annotation pref", async () => {
     const res = await app.request("/api/me", {
       method: "PATCH",

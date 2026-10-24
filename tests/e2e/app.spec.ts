@@ -149,6 +149,54 @@ test("full-translation transcription phrases are tappable → card sheet", async
   await expect(page.getByText("Saved").first()).toBeVisible();
 });
 
+test("write practice sheet: boxes per char, modes switch, close", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "writer"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+
+  // 4-char chengyu in the dictionary → renders as a single word card
+  await page.getByPlaceholder(/rough pinyin/).fill("畫蛇添足");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.locator('[data-traditional="畫蛇添足"]');
+  await expect(card.first()).toBeVisible();
+  await card.first().getByRole("button", { name: "Write practice" }).click();
+
+  const sheet = page.locator("[data-write-sheet]");
+  await expect(sheet).toBeVisible();
+  // 4 boxes at once (2×2), ghost strokes load from /api/strokes
+  await expect(sheet.locator("[data-write-box]")).toHaveCount(4);
+  await expect(sheet.locator("[data-write-box=畫] svg")).toBeVisible();
+  await expect(sheet.getByText(/copy the ghost strokes/)).toBeVisible();
+
+  // switch to write-from-memory mode: pinyin labels become the cues
+  await sheet.getByRole("tab", { name: "Write" }).click();
+  await expect(sheet.getByText(/from memory/)).toBeVisible();
+  await sheet.getByRole("button", { name: "Close" }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
+test("write practice: wrong stroke registers a miss in trace quiz", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "writer2"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+  await page.getByPlaceholder(/rough pinyin/).fill("畫蛇添足");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.locator('[data-traditional="畫蛇添足"]');
+  await expect(card.first()).toBeVisible();
+  await card.first().getByRole("button", { name: "Write practice" }).click();
+
+  const sheet = page.locator("[data-write-sheet]");
+  await expect(sheet.locator("[data-write-box=畫] svg")).toBeVisible();
+
+  // draw a deliberately wrong squiggle → onMistake → ✗ tally
+  const bb = await sheet.locator("[data-write-box=畫]").boundingBox();
+  await page.mouse.move(bb!.x + bb!.width * 0.35, bb!.y + bb!.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(bb!.x + bb!.width * 0.75, bb!.y + bb!.height * 0.65, { steps: 6 });
+  await page.mouse.up();
+  await expect(sheet.getByText(/✗1/)).toBeVisible({ timeout: 8000 });
+});
+
 test("canto: enable both varieties, ask in 粵, jyutping required, save pair", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("devUser", "canto"));
   await page.goto("/");
