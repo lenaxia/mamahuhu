@@ -7,9 +7,26 @@ import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { AnnotatedText } from "./AnnotatedText";
 import { CopyButton } from "./CopyButton";
-import { IconCheck, IconPlay } from "./Icons";
+import { IconCheck, IconPencil, IconPlay } from "./Icons";
 import { Sheet } from "./Sheet";
 import { useToast } from "./Toast";
+import { WritingSheet } from "./WritingSheet";
+
+/** Write-practice state for a card: pencil button wiring + the sheet itself. */
+function useWriting(word: { traditional: string; pinyin?: string; english?: string }): {
+  writing: boolean;
+  openWrite: () => void;
+  closeWrite: () => void;
+  sheet: React.JSX.Element;
+} {
+  const [writing, setWriting] = useState(false);
+  return {
+    writing,
+    openWrite: () => setWriting(true),
+    closeWrite: () => setWriting(false),
+    sheet: <WritingSheet open={writing} onClose={() => setWriting(false)} word={word} />,
+  };
+}
 
 function useSaver(
   source: EntrySource,
@@ -50,10 +67,12 @@ function ActionRow({
   text,
   saved,
   onSave,
+  onWrite,
 }: {
   text: string;
   saved: boolean;
   onSave: () => void;
+  onWrite?: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 pt-1">
@@ -72,6 +91,15 @@ function ActionRow({
         0.6×
       </button>
       <CopyButton text={text} />
+      {onWrite && (
+        <button
+          aria-label="Write practice"
+          onClick={onWrite}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 active:scale-95 transition"
+        >
+          <IconPencil className="h-4 w-4" />
+        </button>
+      )}
       <button
         onClick={onSave}
         disabled={saved}
@@ -92,6 +120,7 @@ function ActionRow({
 export function InterpretationCard({ interp, rank }: { interp: Interpretation; rank: number }) {
   const annotations = useAnnotations();
   const { saved, save } = useSaver("pinyin");
+  const wr = useWriting(interp);
   const syllables: Syllables = interp.words.map(wordChars);
 
   return (
@@ -112,7 +141,8 @@ export function InterpretationCard({ interp, rank }: { interp: Interpretation; r
           </div>
         ))}
       </div>
-      <ActionRow text={interp.traditional} saved={saved} onSave={() => void save(interp, syllables)} />
+      <ActionRow text={interp.traditional} saved={saved} onSave={() => void save(interp, syllables)} onWrite={wr.openWrite} />
+      {wr.sheet}
     </div>
   );
 }
@@ -121,13 +151,15 @@ export function InterpretationCard({ interp, rank }: { interp: Interpretation; r
 export function ChengyuCard({ word }: { word: RenderedWord }) {
   const annotations = useAnnotations();
   const { saved, save } = useSaver("en-translate");
+  const wr = useWriting(word);
   const syllables: Syllables = [wordChars(word)];
   return (
     <div data-chengyu={word.traditional} className="rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20 p-4 shadow-sm space-y-3">
       <div className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400">成語 · idiom</div>
       <AnnotatedText syllables={syllables} annotations={annotations} />
       <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{word.english.split(" / ").slice(0, 3).join("; ")}</p>
-      <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} />
+      <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} onWrite={wr.openWrite} />
+      {wr.sheet}
     </div>
   );
 }
@@ -235,12 +267,14 @@ export function PhraseCard({
     bpmf: phrase.bpmf,
     english: phrase.english,
   };
+  const [writing, setWriting] = useState(false);
   return (
     <div data-traditional={phrase.traditional} className="rounded-2xl border-2 border-amber-300 dark:border-amber-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
       <div className="text-xs uppercase tracking-wide text-amber-600 dark:text-amber-400">{phrase.answer ? "answer" : "whole phrase"}</div>
       <AnnotatedText syllables={syllables} annotations={annotations} />
       <p className="text-[15px] text-neutral-700 dark:text-neutral-300">{phrase.english}</p>
-      <ActionRow text={phrase.traditional} saved={saved} onSave={() => void save(asWord, syllables)} />
+      <ActionRow text={phrase.traditional} saved={saved} onSave={() => void save(asWord, syllables)} onWrite={() => setWriting(true)} />
+      <WritingSheet open={writing} onClose={() => setWriting(false)} word={asWord} />
     </div>
   );
 }
@@ -370,6 +404,7 @@ function isHanChar(c: string): boolean {
 export function HanziWordCard({ word, onSaved, askId }: { word: RenderedWord & { known: boolean }; onSaved?: (t: string) => void; askId?: string }) {
   const annotations = useAnnotations();
   const { saved, save } = useSaver("hanzi", onSaved, askId);
+  const wr = useWriting(word);
   const syllables: Syllables = [wordChars(word)];
   return (
     <div data-traditional={word.traditional} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm space-y-3">
@@ -378,7 +413,17 @@ export function HanziWordCard({ word, onSaved, askId }: { word: RenderedWord & {
       <p className="text-[15px] text-neutral-700 dark:text-neutral-300">
         {word.known ? word.english.split(" / ").slice(0, 3).join("; ") : "—"}
       </p>
-      {word.known && <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} />}
+      {word.known ? (
+        <ActionRow text={word.traditional} saved={saved} onSave={() => void save(word, syllables)} onWrite={wr.openWrite} />
+      ) : (
+        <button
+          onClick={wr.openWrite}
+          className="flex items-center gap-2 rounded-full bg-neutral-100 dark:bg-neutral-800 px-4 py-2.5 text-sm font-semibold active:scale-95 transition"
+        >
+          <IconPencil className="h-4 w-4" /> Write practice
+        </button>
+      )}
+      {wr.sheet}
     </div>
   );
 }

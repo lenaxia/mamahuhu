@@ -3,6 +3,7 @@ import type { Entry } from "../../shared/api";
 import { api } from "../api";
 import { AnnotatedText } from "../components/AnnotatedText";
 import { Segmented } from "../components/Segmented";
+import { WritingSheet } from "../components/WritingSheet";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
 import { useToast } from "../components/Toast";
@@ -62,6 +63,7 @@ export function ReviewScreen({ active = true }: { active?: boolean }): React.JSX
 
   const card = queue[idx];
   const variety = card?.variety === "zh-HK" ? "zh-HK" : "zh-Hant";
+  const [writing, setWriting] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -109,6 +111,14 @@ export function ReviewScreen({ active = true }: { active?: boolean }): React.JSX
                   >
                     0.6×
                   </span>
+                  <span
+                    role="button"
+                    aria-label="Write practice"
+                    onClick={(e) => { e.stopPropagation(); setWriting(true); }}
+                    className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-4 py-2.5 text-sm font-semibold"
+                  >
+                    ✍
+                  </span>
                 </div>
               </>
             ) : front === "en" ? (
@@ -140,6 +150,17 @@ export function ReviewScreen({ active = true }: { active?: boolean }): React.JSX
             </div>
           )}
         </>
+      )}
+      {card && (
+        <WritingSheet
+          open={writing}
+          onClose={() => setWriting(false)}
+          word={{
+            traditional: card.traditional,
+            pinyin: card.syllables.flat().map((s) => s.py).join(" "),
+            english: card.english,
+          }}
+        />
       )}
     </div>
   );
