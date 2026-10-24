@@ -158,6 +158,7 @@ export function ReviewScreen({ active = true }: { active?: boolean }): React.JSX
           word={{
             traditional: card.traditional,
             pinyin: card.syllables.flat().map((s) => s.py).join(" "),
+            bpmf: card.syllables.flat().map((s) => s.bpmf).filter(Boolean).join(" "),
             english: card.english,
           }}
         />

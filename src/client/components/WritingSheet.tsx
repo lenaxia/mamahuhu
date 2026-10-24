@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import HanziWriter from "hanzi-writer";
 import { Segmented } from "./Segmented";
 import { IconClose, IconCheck } from "./Icons";
+import { useAnnotations } from "../state";
 
 /** Writing practice — a row/grid of up to 4 田-character boxes, one per char.
  *  Modes: Animate (watch), Trace (copy the ghost, stroke-validated), Drill
@@ -32,7 +33,7 @@ const MODE_HINT: Record<WriteMode, string> = {
   animate: "watch the stroke order — boxes play in sequence",
   trace: "copy the ghost strokes in order",
   drill: "write all the boxes — then it clears and goes again",
-  write: "from memory — pinyin above each box is your cue",
+  write: "from memory — the sound above each box is your cue",
 };
 
 export function WritingSheet({
@@ -42,10 +43,20 @@ export function WritingSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  word: { traditional: string; pinyin?: string; english?: string };
+  word: { traditional: string; pinyin?: string; bpmf?: string; english?: string };
 }): React.JSX.Element | null {
+  const annotations = useAnnotations();
   const chars = [...word.traditional].filter((c) => /\p{Script=Han}/u.test(c));
   const pinyins = word.pinyin?.trim().split(/\s+/) ?? [];
+  const bpmfs = word.bpmf?.trim().split(/\s+/) ?? [];
+  // respect the annotation pref (bpmf-only users never see pinyin)
+  const rom = (i?: number): string => {
+    const py = i === undefined ? word.pinyin : pinyins[i];
+    const bp = i === undefined ? word.bpmf : bpmfs[i];
+    if (annotations === "bpmf") return bp || py || "";
+    if (annotations === "pinyin") return py || bp || "";
+    return [py, bp].filter(Boolean).join(" · ");
+  };
   // >4 chars (long phrases): practice in pages of 4
   const groups: string[][] = [];
   for (let i = 0; i < chars.length; i += 4) groups.push(chars.slice(i, i + 4));
@@ -57,6 +68,7 @@ export function WritingSheet({
   const [tally, setTally] = useState({ ok: 0, miss: 0, rounds: 0 });
   const [done, setDone] = useState<boolean[]>([]);
   const [animateIdx, setAnimateIdx] = useState(0);
+  const [resetKey, setResetKey] = useState(0);
   const resetRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -64,17 +76,17 @@ export function WritingSheet({
     setDone([]);
     setTally({ ok: 0, miss: 0, rounds: 0 });
     setAnimateIdx(0);
+    setResetKey((k) => k + 1);
   }, [word.traditional]);
 
   if (!open || group.length === 0) return null;
 
-  const focus = Math.min(done.filter(Boolean).length, group.length - 1);
   const allDone = done.filter(Boolean).length >= group.length;
-  const quiz = mode === "trace" || mode === "drill" || mode === "write";
 
   function resetWord(): void {
     setDone([]);
     setAnimateIdx(0);
+    setResetKey((k) => k + 1); // remount boxes → clear ink, restart quizzes
   }
   resetRef.current = () => {
     resetWord();
@@ -93,7 +105,6 @@ export function WritingSheet({
     });
   }
 
-  const cols = group.length === 4 ? "grid-cols-2" : group.length === 3 ? "grid-cols-3" : group.length === 2 ? "grid-cols-2" : "grid-cols-1";
 
   return (
     <div
@@ -107,7 +118,7 @@ export function WritingSheet({
           <p lang="zh-Hant" className="hanzi truncate text-lg font-semibold">
             {word.traditional}
           </p>
-          <p className="truncate text-xs text-sky-700 dark:text-sky-400">{word.pinyin}</p>
+          <p className="truncate text-xs text-sky-700 dark:text-sky-400">{rom()}</p>
           {word.english && <p className="truncate text-xs text-neutral-400">{word.english.split(" / ")[0]}</p>}
         </div>
         <button aria-label="Close" onClick={onClose} className="rounded-full p-2 text-neutral-500">
@@ -133,15 +144,19 @@ export function WritingSheet({
       </div>
 
       <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-4">
-        <div className={`grid w-full gap-3 ${cols} ${group.length === 1 ? "max-w-[min(72vw,340px)] mx-auto" : "max-w-md"}`}>
+        <div
+          dir={group.length > 1 ? "rtl" : "ltr"}
+          className={`grid justify-center gap-3 ${group.length > 1 ? "grid-flow-col grid-rows-2 [grid-auto-columns:min(42vw,200px)]" : "w-full max-w-[min(72vw,340px)] mx-auto"}`}
+        >
           {group.map((ch, i) => (
             <WriterBox
-              key={`${ch}-${gi}-${i}`}
+              key={`${ch}-${gi}-${i}-${resetKey}`}
               ch={ch}
               mode={mode}
               ghost={ghost}
-              active={(quiz ? i === focus && !done[i] : i === animateIdx) && !allDone}
-              label={mode === "write" ? pinyins[i] ?? ch : ch}
+              active={mode !== "animate" || i === animateIdx}
+              label={mode === "write" ? rom(i) || ch : ch}
+              order={i + 1}
               done={!!done[i]}
               onDone={() => boxDone(i)}
               onAnimateDone={() => setAnimateIdx((a) => (a + 1) % group.length)}
@@ -220,6 +235,7 @@ function WriterBox({
   ghost,
   active,
   label,
+  order,
   done,
   onDone,
   onAnimateDone,
@@ -230,6 +246,7 @@ function WriterBox({
   ghost: boolean;
   active: boolean;
   label: string;
+  order: number;
   done: boolean;
   onDone: () => void;
   onAnimateDone: () => void;
@@ -269,9 +286,9 @@ function WriterBox({
       height: size,
       padding: 8,
       strokeColor: dark ? "#fafafa" : "#171717",
-      outlineColor: dark ? "#52525b" : "#d4d4d8",
+      outlineColor: dark ? "rgba(250,250,250,0.16)" : "rgba(23,23,23,0.13)",
       drawingColor: "#f59e0b",
-      drawingWidth: 4,
+      drawingWidth: 6,
       highlightColor: "#0ea5e9",
       showCharacter: mode === "animate",
       showOutline: mode === "trace" || ((mode === "drill" || mode === "write") && ghost),
@@ -317,8 +334,11 @@ function WriterBox({
             : active
               ? "border-amber-400 dark:border-amber-500"
               : "border-neutral-200 dark:border-neutral-800"
-        } ${active ? "" : "pointer-events-none"}`}
+        }`}
       >
+        <span className="pointer-events-none absolute left-1.5 top-1 text-[10px] tabular-nums text-neutral-300 dark:text-neutral-600">
+          {order}
+        </span>
         {/* 田 grid guides */}
         <div className="pointer-events-none absolute inset-x-2 top-1/2 h-px bg-neutral-100 dark:bg-neutral-800" />
         <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px bg-neutral-100 dark:bg-neutral-800" />
@@ -328,14 +348,14 @@ function WriterBox({
             <IconCheck className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
           </span>
         )}
-        {missing && <FreeDrawBox ch={ch} onDone={onDone} />}
+        {missing && <FreeDrawBox ch={ch} onDone={onDone} ghost={mode === "trace" || ghost} />}
       </div>
     </div>
   );
 }
 
 /** Fallback for chars with no stroke data: draw freely, ✓ when satisfied. */
-function FreeDrawBox({ ch, onDone }: { ch: string; onDone: () => void }): React.JSX.Element {
+function FreeDrawBox({ ch, onDone, ghost }: { ch: string; onDone: () => void; ghost: boolean }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
 
@@ -357,6 +377,14 @@ function FreeDrawBox({ ch, onDone }: { ch: string; onDone: () => void }): React.
 
   return (
     <div className="absolute inset-0">
+      {ghost && (
+        <span
+          lang="zh-Hant"
+          className="hanzi pointer-events-none absolute inset-0 flex items-center justify-center text-6xl text-neutral-200 dark:text-neutral-700 select-none"
+        >
+          {ch}
+        </span>
+      )}
       <canvas
         ref={canvasRef}
         data-free-draw
@@ -382,14 +410,9 @@ function FreeDrawBox({ ch, onDone }: { ch: string; onDone: () => void }): React.
         }}
         onPointerUp={() => (drawing.current = false)}
       />
-      <span
-        lang="zh-Hant"
-        className="hanzi pointer-events-none absolute inset-0 flex items-center justify-center text-6xl text-neutral-200 dark:text-neutral-700 select-none"
-      >
-        {ch}
-      </span>
       <button
         onClick={onDone}
+        aria-label="Mark done"
         className="absolute bottom-1 right-1 rounded-full bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-white shadow"
       >
         ✓
