@@ -54,7 +54,7 @@ export function WritingSheet({
 }): React.JSX.Element | null {
   const annotations = useAnnotations();
   const list = deck && deck.length > 0 ? deck : [word];
-  const [di, setDi] = useState(0);
+  const [di, setDi] = useState(startAt);
   const cur = list[Math.min(di, list.length - 1)] ?? word;
   const chars = [...cur.traditional].filter((c) => /\p{Script=Han}/u.test(c));
   const pinyins = cur.pinyin?.trim().split(/\s+/) ?? [];
@@ -87,7 +87,12 @@ export function WritingSheet({
     setTally({ ok: 0, miss: 0, rounds: 0 });
     setAnimateIdx(0);
     setResetKey((k) => k + 1);
-  }, [cur.traditional, open]);
+  }, [cur.traditional]);
+
+  // (re)opened from a list: start at the tapped word, not the deck head
+  useEffect(() => {
+    if (open) setDi(startAt);
+  }, [open, startAt]);
 
   if (!open || group.length === 0) return null;
 

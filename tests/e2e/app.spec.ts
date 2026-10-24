@@ -323,3 +323,36 @@ test("ocr overlay renders after browsing away while processing", async ({ page }
   await expect(page.locator("img[alt=page]")).toBeVisible();
   await expect(page.locator('[data-ocr-word="小貓"]').first()).toBeVisible();
 });
+
+test("writing deck opens at the tapped saved word, not the newest", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "deck"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+
+  // save two words: 我 first, then 你 (list shows newest first)
+  await page.getByPlaceholder(/rough pinyin/).fill("我");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card1 = page.locator('[data-traditional="我"]').first();
+  await expect(card1).toBeVisible();
+  await card1.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved").first()).toBeVisible();
+
+  await page.getByPlaceholder(/rough pinyin/).fill("你");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card2 = page.locator('[data-traditional="你"]').first();
+  await expect(card2).toBeVisible();
+  await card2.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved").first()).toBeVisible();
+
+  // words tab → open the OLDER entry (我, second in the list) → write
+  await page.getByRole("button", { name: "Words" }).click();
+  await page.locator('[data-traditional="我"]').first().click();
+  await page.getByRole("button", { name: "Write practice" }).click();
+
+  const sheet = page.locator("[data-write-sheet]");
+  await expect(sheet).toBeVisible();
+  // header shows the tapped word and its deck position, not the newest save
+  await expect(sheet.getByText("2 / 2")).toBeVisible();
+  const header = await sheet.locator("p.hanzi").first().textContent();
+  expect(header?.trim()).toBe("我");
+});
