@@ -292,6 +292,9 @@ function WriterBox({
   const [size, setSize] = useState(0);
   const [missing, setMissing] = useState(false);
   const [writer, setWriter] = useState<HanziWriter | null>(null);
+  // hanzi-writer's animate/quiz stall if started before char data lands —
+  // our loader tells us when it's safe
+  const [dataReady, setDataReady] = useState(false);
 
   useLayoutEffect(() => {
     const el = hostRef.current;
@@ -306,6 +309,7 @@ function WriterBox({
     const host = hostRef.current;
     if (!host || size < 40 || missing) return;
     const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+    setDataReady(false);
     const w = HanziWriter.create(host, ch, {
       charDataLoader: (character: string, onComplete: (data: HanziWriterData) => void) => {
         const p = loadStrokes(character);
@@ -315,7 +319,10 @@ function WriterBox({
         }
         void p.then((d) => {
           if (d === "missing") setMissing(true);
-          else onComplete(d);
+          else {
+            onComplete(d);
+            setDataReady(true);
+          }
         });
       },
       width: size,
@@ -343,9 +350,9 @@ function WriterBox({
     };
   }, [ch, mode, ghost, size, missing]);
 
-  // quiz/animate lifecycle once the writer exists
+  // quiz/animate lifecycle once the writer AND its char data exist
   useEffect(() => {
-    if (!writer) return;
+    if (!writer || !dataReady) return;
     if (mode === "animate") {
       if (active) writer.animateCharacter({ onComplete: () => onAnimateDone() });
       return;
@@ -357,7 +364,7 @@ function WriterBox({
         onComplete: () => onDone(),
       });
     }
-  }, [writer, active, mode]);
+  }, [writer, dataReady, active, mode]);
 
   return (
     <div className="flex w-full max-w-[min(72vw,150px)] flex-col items-center gap-1">
