@@ -36,23 +36,33 @@ const MODE_HINT: Record<WriteMode, string> = {
   write: "from memory — the sound above each box is your cue",
 };
 
+export type WriteWord = { traditional: string; pinyin?: string; bpmf?: string; english?: string };
+
 export function WritingSheet({
   open,
   onClose,
   word,
+  deck,
+  startAt = 0,
 }: {
   open: boolean;
   onClose: () => void;
-  word: { traditional: string; pinyin?: string; bpmf?: string; english?: string };
+  word: WriteWord;
+  /** whole list to move through with ‹ › (defaults to just this word) */
+  deck?: WriteWord[];
+  startAt?: number;
 }): React.JSX.Element | null {
   const annotations = useAnnotations();
-  const chars = [...word.traditional].filter((c) => /\p{Script=Han}/u.test(c));
-  const pinyins = word.pinyin?.trim().split(/\s+/) ?? [];
-  const bpmfs = word.bpmf?.trim().split(/\s+/) ?? [];
+  const list = deck && deck.length > 0 ? deck : [word];
+  const [di, setDi] = useState(0);
+  const cur = list[Math.min(di, list.length - 1)] ?? word;
+  const chars = [...cur.traditional].filter((c) => /\p{Script=Han}/u.test(c));
+  const pinyins = cur.pinyin?.trim().split(/\s+/) ?? [];
+  const bpmfs = cur.bpmf?.trim().split(/\s+/) ?? [];
   // respect the annotation pref (bpmf-only users never see pinyin)
   const rom = (i?: number): string => {
-    const py = i === undefined ? word.pinyin : pinyins[i];
-    const bp = i === undefined ? word.bpmf : bpmfs[i];
+    const py = i === undefined ? cur.pinyin : pinyins[i];
+    const bp = i === undefined ? cur.bpmf : bpmfs[i];
     if (annotations === "bpmf") return bp || py || "";
     if (annotations === "pinyin") return py || bp || "";
     return [py, bp].filter(Boolean).join(" · ");
@@ -77,7 +87,7 @@ export function WritingSheet({
     setTally({ ok: 0, miss: 0, rounds: 0 });
     setAnimateIdx(0);
     setResetKey((k) => k + 1);
-  }, [word.traditional]);
+  }, [cur.traditional, open]);
 
   if (!open || group.length === 0) return null;
 
@@ -114,17 +124,44 @@ export function WritingSheet({
       className="fixed inset-0 z-50 flex flex-col bg-neutral-50 dark:bg-neutral-950"
     >
       <div className="flex items-start justify-between gap-3 px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2">
-        <div className="min-w-0">
-          <p lang="zh-Hant" className="hanzi truncate text-lg font-semibold">
-            {word.traditional}
-          </p>
-          <p className="truncate text-xs text-sky-700 dark:text-sky-400">{rom()}</p>
-          {word.english && <p className="truncate text-xs text-neutral-400">{word.english.split(" / ")[0]}</p>}
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {list.length > 1 && (
+            <button
+              aria-label="Previous word"
+              disabled={di === 0}
+              onClick={() => setDi(di - 1)}
+              className="shrink-0 rounded-full px-2.5 py-1.5 text-lg text-neutral-400 disabled:opacity-25"
+            >
+              ‹
+            </button>
+          )}
+          <div className="min-w-0 flex-1 text-center">
+            <p lang="zh-Hant" className="hanzi truncate text-lg font-semibold">
+              {cur.traditional}
+            </p>
+            <p className="truncate text-xs text-sky-700 dark:text-sky-400">{rom()}</p>
+            {cur.english && <p className="truncate text-xs text-neutral-400">{cur.english.split(" / ")[0]}</p>}
+          </div>
+          {list.length > 1 && (
+            <button
+              aria-label="Next word"
+              disabled={di >= list.length - 1}
+              onClick={() => setDi(di + 1)}
+              className="shrink-0 rounded-full px-2.5 py-1.5 text-lg text-neutral-400 disabled:opacity-25"
+            >
+              ›
+            </button>
+          )}
         </div>
         <button aria-label="Close" onClick={onClose} className="rounded-full p-2 text-neutral-500">
           <IconClose className="h-5 w-5" />
         </button>
       </div>
+      {list.length > 1 && (
+        <div className="px-4 pb-1 text-center text-[11px] tabular-nums text-neutral-400">
+          {di + 1} / {list.length}
+        </div>
+      )}
 
       <div className="px-4">
         <Segmented<WriteMode>
@@ -145,8 +182,7 @@ export function WritingSheet({
 
       <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-4">
         <div
-          dir={group.length > 1 ? "rtl" : "ltr"}
-          className={`grid justify-center gap-3 ${group.length > 1 ? "grid-flow-col grid-rows-2 [grid-auto-columns:min(42vw,200px)]" : "w-full max-w-[min(72vw,340px)] mx-auto"}`}
+          className={`grid w-full gap-2 ${["grid-cols-1", "grid-cols-2", "grid-cols-3", "grid-cols-4"][group.length - 1] ?? "grid-cols-4"}`}
         >
           {group.map((ch, i) => (
             <WriterBox
@@ -156,7 +192,6 @@ export function WritingSheet({
               ghost={ghost}
               active={mode !== "animate" || i === animateIdx}
               label={mode === "write" ? rom(i) || ch : ch}
-              order={i + 1}
               done={!!done[i]}
               onDone={() => boxDone(i)}
               onAnimateDone={() => setAnimateIdx((a) => (a + 1) % group.length)}
@@ -235,7 +270,6 @@ function WriterBox({
   ghost,
   active,
   label,
-  order,
   done,
   onDone,
   onAnimateDone,
@@ -246,7 +280,6 @@ function WriterBox({
   ghost: boolean;
   active: boolean;
   label: string;
-  order: number;
   done: boolean;
   onDone: () => void;
   onAnimateDone: () => void;
@@ -336,9 +369,6 @@ function WriterBox({
               : "border-neutral-200 dark:border-neutral-800"
         }`}
       >
-        <span className="pointer-events-none absolute left-1.5 top-1 text-[10px] tabular-nums text-neutral-300 dark:text-neutral-600">
-          {order}
-        </span>
         {/* 田 grid guides */}
         <div className="pointer-events-none absolute inset-x-2 top-1/2 h-px bg-neutral-100 dark:bg-neutral-800" />
         <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px bg-neutral-100 dark:bg-neutral-800" />

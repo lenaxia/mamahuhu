@@ -4,7 +4,8 @@ import { api, ApiError } from "../api";
 import { EntryCard } from "../components/EntryCard";
 import { Segmented } from "../components/Segmented";
 import { Sheet } from "../components/Sheet";
-import { IconPlay, IconTrash } from "../components/Icons";
+import { IconPencil, IconPlay, IconTrash } from "../components/Icons";
+import { WritingSheet, type WriteWord } from "../components/WritingSheet";
 import { CopyButton } from "../components/CopyButton";
 import { FollowUpBox } from "../components/Cards";
 import { AnnotatedText } from "../components/AnnotatedText";
@@ -21,6 +22,9 @@ export function WordsScreen({ active = true }: { active?: boolean }): React.JSX.
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Entry | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
+  const [writing, setWriting] = useState(false);
+  const writeDeck: WriteWord[] = items.map((e) => ({ traditional: e.traditional, pinyin: e.pinyin, bpmf: e.bpmf, english: e.english }));
+  const writeAt = Math.max(0, items.findIndex((e) => e.id === open?.id));
 
   const load = useCallback(async (scope: "mine" | "all", q: string): Promise<void> => {
     setLoading(true);
@@ -134,6 +138,13 @@ export function WordsScreen({ active = true }: { active?: boolean }): React.JSX.
               </button>
               <CopyButton text={open.traditional} className="h-11 w-11" />
               <button
+                onClick={() => setWriting(true)}
+                aria-label="Write practice"
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
+              >
+                <IconPencil className="h-5 w-5" />
+              </button>
+              <button
                 onClick={() => void remove(open)}
                 className="ml-auto flex h-11 w-11 items-center justify-center rounded-full bg-red-50 dark:bg-red-950/50 text-red-500"
                 aria-label="Delete"
@@ -170,6 +181,15 @@ export function WordsScreen({ active = true }: { active?: boolean }): React.JSX.
           </div>
         )}
       </Sheet>
+      {open && (
+        <WritingSheet
+          open={writing}
+          onClose={() => setWriting(false)}
+          word={writeDeck[writeAt] ?? { traditional: open.traditional, pinyin: open.pinyin, bpmf: open.bpmf, english: open.english }}
+          deck={writeDeck}
+          startAt={writeAt}
+        />
+      )}
     </div>
   );
 }

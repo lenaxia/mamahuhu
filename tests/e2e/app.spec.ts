@@ -163,14 +163,15 @@ test("write practice sheet: boxes per char, modes switch, close", async ({ page 
 
   const sheet = page.locator("[data-write-sheet]");
   await expect(sheet).toBeVisible();
-  // 4 boxes at once (vertical 2×2: right column reads first), ghost strokes load from /api/strokes
+  // 4 boxes at once in a single horizontal row, ghost strokes load from /api/strokes
   await expect(sheet.locator("[data-write-box]")).toHaveCount(4);
   await expect(sheet.locator("[data-write-box] svg")).toHaveCount(4);
   const b1 = await sheet.locator("[data-write-box=畫]").boundingBox();
   const b2 = await sheet.locator("[data-write-box=蛇]").boundingBox();
   const b3 = await sheet.locator("[data-write-box=添]").boundingBox();
-  expect(b1!.y).toBeLessThan(b2!.y); // vertical: char 1 above char 2, same column
-  expect(b1!.x).toBeGreaterThan(b3!.x); // right column reads before left
+  expect(b1!.y).toBe(b2!.y); // one row: same vertical position
+  expect(b1!.x).toBeLessThan(b2!.x); // left to right
+  expect(b2!.x).toBeLessThan(b3!.x);
   await expect(sheet.getByText(/copy the ghost strokes/)).toBeVisible();
   // drill mode: every box accepts input at once (no sequential gating)
   await sheet.getByRole("tab", { name: "Drill" }).click();
