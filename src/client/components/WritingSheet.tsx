@@ -181,9 +181,7 @@ export function WritingSheet({
       </div>
 
       <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-4">
-        <div
-          className={`grid w-full gap-2 ${["grid-cols-1", "grid-cols-2", "grid-cols-3", "grid-cols-4"][group.length - 1] ?? "grid-cols-4"}`}
-        >
+        <div className="flex w-full flex-col items-center gap-2">
           {group.map((ch, i) => (
             <WriterBox
               key={`${ch}-${gi}-${i}-${resetKey}`}
@@ -357,7 +355,7 @@ function WriterBox({
   }, [writer, active, mode]);
 
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div className="flex w-full max-w-[min(72vw,150px)] flex-col items-center gap-1">
       <span className={`text-xs ${done ? "text-emerald-500" : "text-neutral-400"} tabular-nums`}>{label}</span>
       <div
         data-write-box={ch}
