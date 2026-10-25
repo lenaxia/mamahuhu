@@ -185,6 +185,38 @@ test("write practice sheet: boxes per char, modes switch, close", async ({ page 
   await expect(sheet).toHaveCount(0);
 });
 
+test("write practice: animate mode visibly plays strokes", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("devUser", "writer3"));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start asking" }).click();
+  await page.getByPlaceholder(/rough pinyin/).fill("畫蛇添足");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.locator('[data-traditional="畫蛇添足"]');
+  await expect(card.first()).toBeVisible();
+  await card.first().getByRole("button", { name: "Write practice" }).click();
+
+  const sheet = page.locator("[data-write-sheet]");
+  await sheet.getByRole("tab", { name: "Animate" }).click();
+
+  // the first box's drawn-stroke count must increase — the animation plays
+  const strokesDrawn = () =>
+    page.evaluate(() => {
+      const el = document.querySelector("[data-write-box=畫]");
+      const svg = el?.querySelector("svg");
+      const main = svg?.querySelector("g");
+      if (!main) return -1;
+      const groups = [...main.children].filter((n) => n.tagName === "g");
+      const charG = groups[1];
+      if (!charG) return -1;
+      return [...charG.querySelectorAll("path")].filter((pt) => parseFloat(getComputedStyle(pt).opacity) > 0.3).length;
+    });
+  // liveness: the visible stroke count must CHANGE (fade-out, then redraw)
+  const initial = await strokesDrawn();
+  await expect
+    .poll(async () => ((await strokesDrawn()) !== initial ? 1 : 0), { timeout: 20000 })
+    .toBe(1);
+});
+
 test("write practice: wrong stroke registers a miss in trace quiz", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("devUser", "writer2"));
   await page.goto("/");

@@ -79,6 +79,7 @@ export function WritingSheet({
   const [done, setDone] = useState<boolean[]>([]);
   const [animateIdx, setAnimateIdx] = useState(0);
   const [resetKey, setResetKey] = useState(0);
+  const [strokeTotals, setStrokeTotals] = useState<Record<string, number | null>>({});
   const resetRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -87,6 +88,7 @@ export function WritingSheet({
     setTally({ ok: 0, miss: 0, rounds: 0 });
     setAnimateIdx(0);
     setResetKey((k) => k + 1);
+    setStrokeTotals({});
   }, [cur.traditional]);
 
   // (re)opened from a list: start at the tapped word, not the deck head
@@ -199,6 +201,7 @@ export function WritingSheet({
               onDone={() => boxDone(i)}
               onAnimateDone={() => setAnimateIdx((a) => (a + 1) % group.length)}
               onStroke={(ok) => setTally((t) => ({ ...t, ok: t.ok + (ok ? 1 : 0), miss: t.miss + (ok ? 0 : 1) }))}
+              onStatus={(ch, total) => setStrokeTotals((t) => ({ ...t, [ch]: total }))}
             />
           ))}
         </div>
@@ -234,7 +237,11 @@ export function WritingSheet({
 
       <div className="space-y-3 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <p data-write-status className="text-center text-xs text-neutral-400">
-          {MODE_HINT[mode]}
+          {mode === "animate" && group.some((ch) => strokeTotals[ch] === undefined)
+            ? "loading strokes…"
+            : mode === "animate" && group.some((ch) => strokeTotals[ch] === null)
+              ? "no stroke data for some chars — free draw only"
+              : MODE_HINT[mode]}
           {tally.ok + tally.miss > 0 && (
             <span className="ml-2 tabular-nums">
               ✓{tally.ok} ✗{tally.miss}
@@ -277,6 +284,7 @@ function WriterBox({
   onDone,
   onAnimateDone,
   onStroke,
+  onStatus,
 }: {
   ch: string;
   mode: WriteMode;
@@ -287,14 +295,17 @@ function WriterBox({
   onDone: () => void;
   onAnimateDone: () => void;
   onStroke: (ok: boolean) => void;
+  onStatus: (ch: string, total: number | null) => void;
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
+  const [animStrokes, setAnimStrokes] = useState(0);
   const [size, setSize] = useState(0);
   const [missing, setMissing] = useState(false);
   const [writer, setWriter] = useState<HanziWriter | null>(null);
   // hanzi-writer's animate/quiz stall if started before char data lands —
   // our loader tells us when it's safe
   const [dataReady, setDataReady] = useState(false);
+  const [total, setTotal] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const el = hostRef.current;
@@ -315,13 +326,19 @@ function WriterBox({
         const p = loadStrokes(character);
         if (p === "missing") {
           setMissing(true);
+          onStatus(character, null);
           return;
         }
         void p.then((d) => {
-          if (d === "missing") setMissing(true);
+          if (d === "missing") {
+            setMissing(true);
+            onStatus(character, null);
+          }
           else {
             onComplete(d);
             setDataReady(true);
+            setTotal(d.strokes.length);
+            onStatus(character, d.strokes.length);
           }
         });
       },
@@ -337,6 +354,8 @@ function WriterBox({
       showOutline: mode === "trace" || ((mode === "drill" || mode === "write") && ghost),
       leniency: 1.15,
       showHintAfterMisses: 3,
+      strokeAnimationSpeed: 3,
+      delayBetweenStrokes: 120,
     });
     setWriter(w);
     return () => {
@@ -349,6 +368,18 @@ function WriterBox({
       setWriter(null);
     };
   }, [ch, mode, ghost, size, missing]);
+
+  // live progress: count this box's drawn strokes while ANIMATING
+  useEffect(() => {
+    if (mode !== "animate" || !writer || !dataReady || !active) return;
+    const iv = setInterval(() => {
+      const grp = [...(hostRef.current?.querySelector("svg > g")?.children ?? [])].filter((n) => n.tagName === "g")[1];
+      if (!grp) return;
+      const vis = [...grp.querySelectorAll("path")].filter((pt) => parseFloat(getComputedStyle(pt).opacity) > 0.3).length;
+      setAnimStrokes(vis);
+    }, 250);
+    return () => clearInterval(iv);
+  }, [mode, writer, dataReady, active]);
 
   // quiz/animate lifecycle once the writer AND its char data exist
   useEffect(() => {
@@ -368,7 +399,10 @@ function WriterBox({
 
   return (
     <div className="flex w-full max-w-[min(72vw,150px)] flex-col items-center gap-1">
-      <span className={`text-xs ${done ? "text-emerald-500" : "text-neutral-400"} tabular-nums`}>{label}</span>
+      <span className={`text-xs ${done ? "text-emerald-500" : "text-neutral-400"} tabular-nums`}>
+        {label}
+        {mode === "animate" && active && total !== null && <span className="ml-1 text-amber-600 dark:text-amber-400">{animStrokes}/{total}</span>}
+      </span>
       <div
         data-write-box={ch}
         className={`relative aspect-square w-full overflow-hidden rounded-xl border-2 bg-white dark:bg-neutral-900 ${
