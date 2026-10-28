@@ -81,6 +81,20 @@ export function WritingSheet({
   const [resetKey, setResetKey] = useState(0);
   const [strokeTotals, setStrokeTotals] = useState<Record<string, number | null>>({});
   const resetRef = useRef<() => void>(() => {});
+  // two boxes fill the area exactly; a 3rd/4th char scrolls into view
+  const areaRef = useRef<HTMLDivElement>(null);
+  const [boxSize, setBoxSize] = useState(0);
+  useLayoutEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth - 32; // px-4 padding
+      const h = (el.clientHeight - 32 - 12) / 2; // py-4 padding + gap-3 between boxes
+      setBoxSize(Math.max(140, Math.floor(Math.min(w, h, 440))));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open, cur.traditional]);
 
   useEffect(() => {
     setGi(0);
@@ -187,9 +201,10 @@ export function WritingSheet({
         />
       </div>
 
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-4">
-        <div className="flex w-full flex-col items-center gap-2">
+      <div ref={areaRef} className="relative flex-1 overflow-y-auto">
+        <div className="flex min-h-full flex-col items-center justify-center gap-3 px-4 py-4">
           {group.map((ch, i) => (
+            <div key={`${ch}-${gi}-${i}-${resetKey}-wrap`} style={{ width: boxSize || undefined }}>
             <WriterBox
               key={`${ch}-${gi}-${i}-${resetKey}`}
               ch={ch}
@@ -203,8 +218,18 @@ export function WritingSheet({
               onStroke={(ok) => setTally((t) => ({ ...t, ok: t.ok + (ok ? 1 : 0), miss: t.miss + (ok ? 0 : 1) }))}
               onStatus={(ch, total) => setStrokeTotals((t) => ({ ...t, [ch]: total }))}
             />
+            </div>
           ))}
         </div>
+
+        {/* reset on the side */}
+        <button
+          aria-label="Reset"
+          onClick={resetWord}
+          className="absolute right-1.5 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 dark:bg-neutral-800/90 text-2xl text-neutral-500 shadow-md active:scale-95 transition"
+        >
+          ↻
+        </button>
 
         {groups.length > 1 && (
           <div className="flex items-center gap-3 text-sm text-neutral-400">
@@ -260,12 +285,6 @@ export function WritingSheet({
               ghost {ghost ? "on" : "off"}
             </button>
           )}
-          <button
-            onClick={resetWord}
-            className="rounded-full bg-neutral-100 dark:bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-neutral-500"
-          >
-            {allDone ? "Again" : "Reset"}
-          </button>
         </div>
       </div>
     </div>
@@ -398,7 +417,7 @@ function WriterBox({
   }, [writer, dataReady, active, mode]);
 
   return (
-    <div className="flex w-full max-w-[min(72vw,150px)] flex-col items-center gap-1">
+    <div className="flex w-full flex-col items-center gap-1">
       <span className={`text-xs ${done ? "text-emerald-500" : "text-neutral-400"} tabular-nums`}>
         {label}
         {mode === "animate" && active && total !== null && <span className="ml-1 text-amber-600 dark:text-amber-400">{animStrokes}/{total}</span>}
