@@ -10,7 +10,7 @@ function chatStub(responses: string[]): ChatClient {
   let i = 0;
   return {
     async complete(_messages: ChatMessage[]): Promise<Result<string>> {
-      const value = responses[Math.min(i++, responses.length - 1)];
+      const value = responses[Math.min(i++, responses.length - 1)] ?? "";
       return { ok: true, value };
     },
   };
