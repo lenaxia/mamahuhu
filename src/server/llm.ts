@@ -225,14 +225,24 @@ export class LlmTranslationService implements TranslationService {
       if (parsed.success) {
         const casual = completeVariant(parsed.data.casual, variety);
         const formalRaw = completeVariant(parsed.data.formal, variety);
-        if (!variantValid(casual, variety)) break; // repair retry below
-        const formal = variantValid(formalRaw, variety) ? formalRaw : casual;
+        // pinyin mismatches are benign (readings are recomputed from the
+        // dictionary) — the only fatal case is no hanzi at all (English echo)
+        const usable = (v: CardVariant) => variantValid(v, variety) || countHanzi(v.traditional) > 0;
+        if (!usable(casual)) {
+          messages.push({ role: "assistant", content: raw.slice(0, 2000) });
+          messages.push({
+            role: "user",
+            content: "The Chinese fields must contain only Chinese characters (with matching pinyin syllables). Return ONLY the corrected JSON object.",
+          });
+          continue;
+        }
+        const formal = usable(formalRaw) ? formalRaw : casual;
         const alternatives = (parsed.data.alternatives ?? [])
           .map((alt) => {
             const altCasual = completeVariant(alt.casual, variety);
             const altFormalRaw = completeVariant(alt.formal, variety);
-            if (!variantValid(altCasual, variety)) return null;
-            return { casual: altCasual, formal: variantValid(altFormalRaw, variety) ? altFormalRaw : altCasual };
+            if (!usable(altCasual)) return null;
+            return { casual: altCasual, formal: usable(altFormalRaw) ? altFormalRaw : altCasual };
           })
           .filter((a): a is { casual: CardVariant; formal: CardVariant } => a !== null)
           .slice(0, 3);
@@ -241,7 +251,7 @@ export class LlmTranslationService implements TranslationService {
       messages.push({ role: "assistant", content: raw.slice(0, 2000) });
       messages.push({ role: "user", content: "That did not match the JSON schema. Return ONLY the corrected JSON object." });
     }
-    return { ok: false, error: "translation model returned an unusable response (syllable/character mismatch)" };
+    return { ok: false, error: "no Chinese translation came back — try rephrasing" };
   }
 
   async glossZh(text: string): Promise<Result<string>> {
