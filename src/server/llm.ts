@@ -1,11 +1,9 @@
 import { LlmTranslateSchema, type CardVariant } from "../shared/api";
 import { z } from "zod";
-import { marksToNumbered, numberedToBpmf, numberedToMarks } from "../shared/bpmf";
+import { countHanzi, marksToNumbered, numberedToBpmf, numberedToMarks } from "zh-annotate";
 import { normalizeBoxes, parseImageDims } from "./imageinfo";
 import type { ChatClient, ChatMessage, ChatOptions, Result, TranslateOutcome, TranslationService, TtsService, SttService, OcrService, OcrLine, DescribeService, DescribeTag, TaggingService, FollowUpService } from "./ports";
 
-const isHan = (ch: string): boolean => /\p{Script=Han}/u.test(ch);
-const countHanzi = (s: string): number => [...s].filter(isHan).length;
 
 function completeVariant(v: {
   traditional: string;

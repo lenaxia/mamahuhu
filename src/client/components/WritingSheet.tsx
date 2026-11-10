@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import HanziWriter from "hanzi-writer";
 import { Segmented } from "./Segmented";
 import { IconClose, IconCheck } from "./Icons";
+import { isHanChar } from "zh-annotate";
 import { useAnnotations } from "../state";
 
 /** Writing practice — a row/grid of up to 4 田-character boxes, one per char.
@@ -56,7 +57,7 @@ export function WritingSheet({
   const list = deck && deck.length > 0 ? deck : [word];
   const [di, setDi] = useState(startAt);
   const cur = list[Math.min(di, list.length - 1)] ?? word;
-  const chars = [...cur.traditional].filter((c) => /\p{Script=Han}/u.test(c));
+  const chars = [...cur.traditional].filter(isHanChar);
   const pinyins = cur.pinyin?.trim().split(/\s+/) ?? [];
   const bpmfs = cur.bpmf?.trim().split(/\s+/) ?? [];
   // respect the annotation pref (bpmf-only users never see pinyin)

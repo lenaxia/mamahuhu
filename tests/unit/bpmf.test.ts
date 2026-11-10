@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { numberedToBpmf, numberedToMarks, marksToNumbered, phraseToBpmf } from "../../src/shared/bpmf";
+import { numberedToBpmf, numberedToMarks, marksToNumbered, phraseToBpmf } from "zh-annotate";
 
 describe("numberedToBpmf", () => {
   const cases: [string, string][] = [

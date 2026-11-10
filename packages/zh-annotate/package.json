@@ -1,0 +1,11 @@
+{
+  "name": "zh-annotate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pinyin/bopomofo/jyutping annotation for Chinese text — pure, dependency-free",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

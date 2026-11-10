@@ -62,12 +62,11 @@ import {
   UnavailableStt,
   UnavailableTts,
 } from "./llm";
-import { interpret, normalizePinyinTokened, renderWord, segmentHanzi } from "../shared/fuzzy";
+import { interpret, normalizePinyinTokened, renderWord } from "../shared/fuzzy";
 import { makeDefiner, makeMockDefiner } from "./dict";
-import { marksToNumbered, numberedToBpmf, numberedToMarks, stripToneMarks } from "../shared/bpmf";
+import { annotateJyut, marksToNumbered, numberedToBpmf, numberedToMarks, segmentHanzi, segmentJyut, stripToneMarks } from "zh-annotate";
 import { parseImageDims } from "./imageinfo";
 import { toTraditional } from "../shared/cedict";
-import { annotateJyut, segmentJyut } from "../shared/jyutping";
 import { APP_VERSION } from "./version";
 import type { AskKind } from "../shared/api";
 import type { AppDeps, Result, TranslationService, TtsService, SttService, OcrService, DescribeService, TaggingService, FollowUpService } from "./ports";

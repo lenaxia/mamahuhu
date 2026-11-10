@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { z } from "zod";
 import type { Identify, OcrPage, OcrRes } from "../../shared/api";
-import { marksToNumbered, numberedToBpmf } from "../../shared/bpmf";
+import { marksToNumbered, numberedToBpmf } from "zh-annotate";
 import { api, ApiError } from "../api";
 import { HanziWordCard, FollowUpBox, FullTranslationCard } from "./Cards";
 import { CopyButton } from "./CopyButton";

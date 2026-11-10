@@ -1,5 +1,5 @@
 import type { DictWord } from "./cedict";
-import { numberedToBpmf, numberedToMarks, phraseToBpmf, phraseToMarks, UNMARK } from "./bpmf";
+import { phraseToBpmf, phraseToMarks, UNMARK } from "zh-annotate";
 import { isCommon, isFrequent } from "./common";
 import type { Interpretation, RenderedWord, SyllableChar } from "./types";
 
@@ -282,14 +282,3 @@ export function lev(a: string, b: string): number {
   return prev[n] ?? 0;
 }
 
-/** Segments hanzi text into words using Intl.Segmenter (zh-Hant). */
-export function segmentHanzi(text: string): string[] {
-  const seg = new Intl.Segmenter("zh-Hant", { granularity: "word" });
-  const out: string[] = [];
-  for (const s of seg.segment(text)) {
-    if (/\p{Script=Han}/u.test(s.segment)) out.push(s.segment);
-  }
-  return out;
-}
-
-export { numberedToBpmf, numberedToMarks };

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { EntrySource, HanziPhrase, Interpretation, RenderedWord, Syllables } from "../../shared/api";
-import { stripToneMarks } from "../../shared/bpmf";
-import { segmentHanzi, wordChars } from "../../shared/fuzzy";
+import { isHanChar, segmentHanzi, stripToneMarks } from "zh-annotate";
+import { wordChars } from "../../shared/fuzzy";
 import { api } from "../api";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
@@ -394,10 +394,6 @@ export function FullTranslationCard({
       </Sheet>
     </div>
   );
-}
-
-function isHanChar(c: string): boolean {
-  return /\p{Script=Han}/u.test(c);
 }
 
 /** Hanzi-input / OCR word card. */

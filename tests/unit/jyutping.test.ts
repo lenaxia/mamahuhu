@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { annotateJyut, jyutForChar, jyutForWord, jyutPerChar, segmentJyut } from "../../src/shared/jyutping";
+import { annotateJyut, jyutForChar, jyutForWord, jyutPerChar, segmentJyut } from "zh-annotate";
 
 describe("jyutping dictionary", () => {
   it("annotates core colloquial words", () => {

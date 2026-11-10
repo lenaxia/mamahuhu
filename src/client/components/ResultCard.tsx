@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CardVariant, Register, Syllables, TranslateRes } from "../../shared/api";
-import { stripToneMarks } from "../../shared/bpmf";
+import { stripToneMarks } from "zh-annotate";
 import { api } from "../api";
 import { useAnnotations } from "../state";
 import { speak } from "../tts";
